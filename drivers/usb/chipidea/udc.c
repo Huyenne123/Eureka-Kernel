@@ -85,7 +85,7 @@ static int hw_device_state(struct ci_hdrc *ci, u32 dma)
 		hw_write(ci, OP_ENDPTLISTADDR, ~0, dma);
 		/* interrupt, error, port change, reset, sleep/suspend */
 		hw_write(ci, OP_USBINTR, ~0,
-			     USBi_UI|USBi_UEI|USBi_PCI|USBi_URI);
+			     USBi_UI|USBi_UEI|USBi_PCI|USBi_URI|USBi_SLI);
 	} else {
 		hw_write(ci, OP_USBINTR, ~0, 0);
 	}
@@ -746,7 +746,6 @@ __releases(ci->lock)
 __acquires(ci->lock)
 {
 	int retval;
-	u32 intr;
 
 	spin_unlock(&ci->lock);
 	if (ci->gadget.speed != USB_SPEED_UNKNOWN)
@@ -759,11 +758,6 @@ __acquires(ci->lock)
 	retval = hw_usb_reset(ci);
 	if (retval)
 		goto done;
-
-	/* clear SLI */
-	hw_write(ci, OP_USBSTS, USBi_SLI, USBi_SLI);
-	intr = hw_read(ci, OP_USBINTR, ~0);
-	hw_write(ci, OP_USBINTR, ~0, intr | USBi_SLI);
 
 	ci->status = usb_ep_alloc_request(&ci->ep0in->ep, GFP_ATOMIC);
 	if (ci->status == NULL)
@@ -920,9 +914,6 @@ isr_setup_status_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct ci_hdrc *ci = req->context;
 	unsigned long flags;
-
-	if (req->status < 0)
-		return;
 
 	if (ci->setaddr) {
 		hw_usb_set_address(ci, ci->address);
@@ -1623,25 +1614,6 @@ static int ci_udc_pullup(struct usb_gadget *_gadget, int is_on)
 static int ci_udc_start(struct usb_gadget *gadget,
 			 struct usb_gadget_driver *driver);
 static int ci_udc_stop(struct usb_gadget *gadget);
-
-/* Match ISOC IN from the highest endpoint */
-static struct usb_ep *ci_udc_match_ep(struct usb_gadget *gadget,
-			      struct usb_endpoint_descriptor *desc,
-			      struct usb_ss_ep_comp_descriptor *comp_desc)
-{
-	struct ci_hdrc *ci = container_of(gadget, struct ci_hdrc, gadget);
-	struct usb_ep *ep;
-
-	if (usb_endpoint_xfer_isoc(desc) && usb_endpoint_dir_in(desc)) {
-		list_for_each_entry_reverse(ep, &ci->gadget.ep_list, ep_list) {
-			if (ep->caps.dir_in && !ep->claimed)
-				return ep;
-		}
-	}
-
-	return NULL;
-}
-
 /**
  * Device operations part of the API to the USB controller hardware,
  * which don't involve endpoints (or i/o)
@@ -1655,7 +1627,6 @@ static const struct usb_gadget_ops usb_gadget_ops = {
 	.vbus_draw	= ci_udc_vbus_draw,
 	.udc_start	= ci_udc_start,
 	.udc_stop	= ci_udc_stop,
-	.match_ep 	= ci_udc_match_ep,
 };
 
 static int init_eps(struct ci_hdrc *ci)
@@ -1880,7 +1851,7 @@ static irqreturn_t udc_irq(struct ci_hdrc *ci)
 			}
 		}
 
-		if ((USBi_UI | USBi_UEI) & intr)
+		if (USBi_UI  & intr)
 			isr_tr_complete_handler(ci);
 
 		if (USBi_SLI & intr) {

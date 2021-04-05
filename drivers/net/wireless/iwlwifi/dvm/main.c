@@ -981,11 +981,9 @@ static void iwl_bg_restart(struct work_struct *data)
  *
  *****************************************************************************/
 
-static int iwl_setup_deferred_work(struct iwl_priv *priv)
+static void iwl_setup_deferred_work(struct iwl_priv *priv)
 {
 	priv->workqueue = create_singlethread_workqueue(DRV_NAME);
-	if (!priv->workqueue)
-		return -ENOMEM;
 
 	INIT_WORK(&priv->restart, iwl_bg_restart);
 	INIT_WORK(&priv->beacon_update, iwl_bg_beacon_update);
@@ -1004,8 +1002,6 @@ static int iwl_setup_deferred_work(struct iwl_priv *priv)
 
 	setup_timer(&priv->ucode_trace, iwl_bg_ucode_trace,
 		    (unsigned long)priv);
-
-	return 0;
 }
 
 void iwl_cancel_deferred_work(struct iwl_priv *priv)
@@ -1363,9 +1359,7 @@ static struct iwl_op_mode *iwl_op_mode_dvm_start(struct iwl_trans *trans,
 	/********************
 	 * 6. Setup services
 	 ********************/
-	if (iwl_setup_deferred_work(priv))
-		goto out_uninit_drv;
-
+	iwl_setup_deferred_work(priv);
 	iwl_setup_rx_handlers(priv);
 
 	iwl_power_initialize(priv);
@@ -1406,7 +1400,6 @@ out_destroy_workqueue:
 	iwl_cancel_deferred_work(priv);
 	destroy_workqueue(priv->workqueue);
 	priv->workqueue = NULL;
-out_uninit_drv:
 	iwl_uninit_drv(priv);
 out_free_eeprom_blob:
 	kfree(priv->eeprom_blob);

@@ -208,9 +208,7 @@ static int ax88172_bind(struct usbnet *dev, struct usb_interface *intf)
 	int i;
 	unsigned long gpio_bits = dev->driver_info->data;
 
-	ret = usbnet_get_endpoints(dev, intf);
-	if (ret)
-		goto out;
+	usbnet_get_endpoints(dev,intf);
 
 	/* Toggle the GPIOs in a manufacturer/model specific way */
 	for (i = 2; i >= 0; i--) {
@@ -423,9 +421,7 @@ static int ax88772_bind(struct usbnet *dev, struct usb_interface *intf)
 	u8 buf[ETH_ALEN];
 	u32 phyid;
 
-	ret = usbnet_get_endpoints(dev, intf);
-	if (ret)
-		return ret;
+	usbnet_get_endpoints(dev,intf);
 
 	/* Get the MAC address */
 	if (dev->driver_info->data & FLAG_EEPROM_MAC) {
@@ -791,9 +787,7 @@ static int ax88178_bind(struct usbnet *dev, struct usb_interface *intf)
 	int ret;
 	u8 buf[ETH_ALEN];
 
-	ret = usbnet_get_endpoints(dev, intf);
-	if (ret)
-		return ret;
+	usbnet_get_endpoints(dev,intf);
 
 	/* Get the MAC address */
 	ret = asix_read_cmd(dev, AX_CMD_READ_NODE_ID, 0, 0, ETH_ALEN, buf);

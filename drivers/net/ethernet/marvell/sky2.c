@@ -142,7 +142,6 @@ static const struct pci_device_id sky2_id_table[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_MARVELL, 0x436C) }, /* 88E8072 */
 	{ PCI_DEVICE(PCI_VENDOR_ID_MARVELL, 0x436D) }, /* 88E8055 */
 	{ PCI_DEVICE(PCI_VENDOR_ID_MARVELL, 0x4370) }, /* 88E8075 */
-	{ PCI_DEVICE(PCI_VENDOR_ID_MARVELL, 0x4373) }, /* 88E8075 */
 	{ PCI_DEVICE(PCI_VENDOR_ID_MARVELL, 0x4380) }, /* 88E8057 */
 	{ PCI_DEVICE(PCI_VENDOR_ID_MARVELL, 0x4381) }, /* 88E8059 */
 	{ PCI_DEVICE(PCI_VENDOR_ID_MARVELL, 0x4382) }, /* 88E8079 */
@@ -216,7 +215,7 @@ io_error:
 
 static inline u16 gm_phy_read(struct sky2_hw *hw, unsigned port, u16 reg)
 {
-	u16 v = 0;
+	u16 v;
 	__gm_phy_read(hw, port, reg, &v);
 	return v;
 }
@@ -4938,20 +4937,6 @@ static const struct dmi_system_id msi_blacklist[] = {
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "Gateway"),
 			DMI_MATCH(DMI_PRODUCT_NAME, "P-79"),
-		},
-	},
-	{
-		.ident = "ASUS P6T",
-		.matches = {
-			DMI_MATCH(DMI_BOARD_VENDOR, "ASUSTeK Computer INC."),
-			DMI_MATCH(DMI_BOARD_NAME, "P6T"),
-		},
-	},
-	{
-		.ident = "ASUS P6X",
-		.matches = {
-			DMI_MATCH(DMI_BOARD_VENDOR, "ASUSTeK Computer INC."),
-			DMI_MATCH(DMI_BOARD_NAME, "P6X"),
 		},
 	},
 	{}

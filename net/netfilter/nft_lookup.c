@@ -61,10 +61,15 @@ static int nft_lookup_init(const struct nft_ctx *ctx,
 	    tb[NFTA_LOOKUP_SREG] == NULL)
 		return -EINVAL;
 
-	set = nft_set_lookup(ctx->net, ctx->table, tb[NFTA_LOOKUP_SET],
-			     tb[NFTA_LOOKUP_SET_ID]);
-	if (IS_ERR(set))
-		return PTR_ERR(set);
+	set = nf_tables_set_lookup(ctx->table, tb[NFTA_LOOKUP_SET]);
+	if (IS_ERR(set)) {
+		if (tb[NFTA_LOOKUP_SET_ID]) {
+			set = nf_tables_set_lookup_byid(ctx->net,
+							tb[NFTA_LOOKUP_SET_ID]);
+		}
+		if (IS_ERR(set))
+			return PTR_ERR(set);
+	}
 
 	if (set->flags & NFT_SET_EVAL)
 		return -EOPNOTSUPP;
@@ -80,8 +85,7 @@ static int nft_lookup_init(const struct nft_ctx *ctx,
 
 		priv->dreg = nft_parse_register(tb[NFTA_LOOKUP_DREG]);
 		err = nft_validate_register_store(ctx, priv->dreg, NULL,
-						  nft_set_datatype(set),
-						  set->dlen);
+						  set->dtype, set->dlen);
 		if (err < 0)
 			return err;
 	} else if (set->flags & NFT_SET_MAP)

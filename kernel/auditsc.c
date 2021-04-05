@@ -458,7 +458,7 @@ static int audit_filter_rules(struct task_struct *tsk,
 
 		switch (f->type) {
 		case AUDIT_PID:
-			pid = task_pid_nr(tsk);
+			pid = task_tgid_nr(tsk);
 			result = audit_comparator(pid, f->op, f->val);
 			break;
 		case AUDIT_PPID:
@@ -1093,7 +1093,7 @@ static void audit_log_execve_info(struct audit_context *context,
 		}
 
 		/* write as much as we can to the audit log */
-		if (len_buf >= 0) {
+		if (len_buf > 0) {
 			/* NOTE: some magic numbers here - basically if we
 			 *       can't fit a reasonable amount of data into the
 			 *       existing audit buffer, flush it and start with
@@ -1329,6 +1329,9 @@ static void audit_log_exit(struct audit_context *context, struct task_struct *ts
 	/* tsk == current */
 	context->personality = tsk->personality;
 
+// [ SEC_SELINUX_PORTING_COMMON
+	if (context->major != __NR_setsockopt  && context->major != 294 ) {
+// ] SEC_SELINUX_PORTING_COMMON
 	ab = audit_log_start(context, GFP_KERNEL, AUDIT_SYSCALL);
 	if (!ab)
 		return;		/* audit_panic has been called */
@@ -1437,7 +1440,9 @@ static void audit_log_exit(struct audit_context *context, struct task_struct *ts
 	}
 
 	audit_log_proctitle(tsk, context);
-
+// [ SEC_SELINUX_PORTING_COMMON
+	} // End of context->major != __NR_setsockopt
+// ] SEC_SELINUX_PORTING_COMMON
 	/* Send end of event record to help user space know we are finished */
 	ab = audit_log_start(context, GFP_KERNEL, AUDIT_EOE);
 	if (ab)
@@ -1878,8 +1883,6 @@ void __audit_inode_child(const struct inode *parent,
 		}
 	}
 
-	cond_resched();
-
 	/* is there a matching child entry? */
 	list_for_each_entry(n, &context->names_list, list) {
 		/* can only match entries that have a name */
@@ -1994,7 +1997,7 @@ static void audit_log_set_loginuid(kuid_t koldloginuid, kuid_t kloginuid,
 	loginuid = from_kuid(&init_user_ns, kloginuid),
 	tty = audit_get_tty(current);
 
-	audit_log_format(ab, "pid=%d uid=%u", task_pid_nr(current), uid);
+	audit_log_format(ab, "pid=%d uid=%u", task_tgid_nr(current), uid);
 	audit_log_task_context(ab);
 	audit_log_format(ab, " old-auid=%u auid=%u tty=%s old-ses=%u ses=%u res=%d",
 			 oldloginuid, loginuid, tty ? tty_name(tty) : "(none)",
@@ -2221,7 +2224,7 @@ void __audit_ptrace(struct task_struct *t)
 {
 	struct audit_context *context = current->audit_context;
 
-	context->target_pid = task_pid_nr(t);
+	context->target_pid = task_tgid_nr(t);
 	context->target_auid = audit_get_loginuid(t);
 	context->target_uid = task_uid(t);
 	context->target_sessionid = audit_get_sessionid(t);
@@ -2246,7 +2249,7 @@ int __audit_signal_info(int sig, struct task_struct *t)
 
 	if (audit_pid && t->tgid == audit_pid) {
 		if (sig == SIGTERM || sig == SIGHUP || sig == SIGUSR1 || sig == SIGUSR2) {
-			audit_sig_pid = task_pid_nr(tsk);
+			audit_sig_pid = task_tgid_nr(tsk);
 			if (uid_valid(tsk->loginuid))
 				audit_sig_uid = tsk->loginuid;
 			else
@@ -2346,7 +2349,7 @@ int __audit_log_bprm_fcaps(struct linux_binprm *bprm,
 void __audit_log_capset(const struct cred *new, const struct cred *old)
 {
 	struct audit_context *context = current->audit_context;
-	context->capset.pid = task_pid_nr(current);
+	context->capset.pid = task_tgid_nr(current);
 	context->capset.cap.effective   = new->cap_effective;
 	context->capset.cap.inheritable = new->cap_effective;
 	context->capset.cap.permitted   = new->cap_permitted;
@@ -2378,7 +2381,7 @@ static void audit_log_task(struct audit_buffer *ab)
 			 from_kgid(&init_user_ns, gid),
 			 sessionid);
 	audit_log_task_context(ab);
-	audit_log_format(ab, " pid=%d comm=", task_pid_nr(current));
+	audit_log_format(ab, " pid=%d comm=", task_tgid_nr(current));
 	audit_log_untrustedstring(ab, get_task_comm(comm, current));
 	audit_log_d_path_exe(ab, current->mm);
 }

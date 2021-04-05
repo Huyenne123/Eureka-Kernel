@@ -491,6 +491,7 @@ static inline int arch_elf_pt_proc(struct elfhdr *ehdr,
  * arch_check_elf() - check an ELF executable
  * @ehdr:	The main ELF header
  * @has_interp:	True if the ELF has an interpreter, else false.
+ * @interp_ehdr: The interpreter's ELF header
  * @state:	Architecture-specific state preserved throughout the process
  *		of loading the ELF.
  *
@@ -502,6 +503,7 @@ static inline int arch_elf_pt_proc(struct elfhdr *ehdr,
  *         with that return code.
  */
 static inline int arch_check_elf(struct elfhdr *ehdr, bool has_interp,
+				 struct elfhdr *interp_ehdr,
 				 struct arch_elf_state *state)
 {
 	/* Dummy implementation, always proceed */
@@ -831,7 +833,9 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	 * still possible to return an error to the code that invoked
 	 * the exec syscall.
 	 */
-	retval = arch_check_elf(&loc->elf_ex, !!interpreter, &arch_state);
+	retval = arch_check_elf(&loc->elf_ex,
+				!!interpreter, &loc->interp_elf_ex,
+				&arch_state);
 	if (retval)
 		goto out_free_dentry;
 
@@ -850,7 +854,6 @@ static int load_elf_binary(struct linux_binprm *bprm)
 		current->flags |= PF_RANDOMIZE;
 
 	setup_new_exec(bprm);
-	install_exec_creds(bprm);
 
 	/* Do this so that we can load the interpreter, if need be.  We will
 	   change some of these later */
@@ -1085,6 +1088,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 		goto out;
 #endif /* ARCH_HAS_SETUP_ADDITIONAL_PAGES */
 
+	install_exec_creds(bprm);
 	retval = create_elf_tables(bprm, &loc->elf_ex,
 			  load_addr, interp_load_addr);
 	if (retval < 0)
@@ -1097,18 +1101,6 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	current->mm->start_stack = bprm->p;
 
 	if ((current->flags & PF_RANDOMIZE) && (randomize_va_space > 1)) {
-		/*
-		 * For architectures with ELF randomization, when executing
-		 * a loader directly (i.e. no interpreter listed in ELF
-		 * headers), move the brk area out of the mmap region
-		 * (since it grows up, and may collide early with the stack
-		 * growing down), and into the unused ELF_ET_DYN_BASE region.
-		 */
-		if (IS_ENABLED(CONFIG_ARCH_HAS_ELF_RANDOMIZE) &&
-		    loc->elf_ex.e_type == ET_DYN && !interpreter)
-			current->mm->brk = current->mm->start_brk =
-				ELF_ET_DYN_BASE;
-
 		current->mm->brk = current->mm->start_brk =
 			arch_randomize_brk(current->mm);
 #ifdef compat_brk_randomized

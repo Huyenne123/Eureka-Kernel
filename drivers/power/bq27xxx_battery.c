@@ -198,10 +198,10 @@ static u8 bq27500_regs[] = {
 	INVALID_REG_ADDR,	/* TTECP - NA	*/
 	0x0c,	/* NAC		*/
 	0x12,	/* LMD(FCC)	*/
-	0x2a,	/* CYCT		*/
+	0x1e,	/* CYCT		*/
 	INVALID_REG_ADDR,	/* AE - NA	*/
-	0x2c,	/* SOC(RSOC)	*/
-	0x3c,	/* DCAP(ILMD)	*/
+	0x20,	/* SOC(RSOC)	*/
+	0x2e,	/* DCAP(ILMD)	*/
 	INVALID_REG_ADDR,	/* AP - NA	*/
 };
 
@@ -242,7 +242,7 @@ static u8 bq27541_regs[] = {
 	INVALID_REG_ADDR,	/* AE - NA	*/
 	0x2c,	/* SOC(RSOC)	*/
 	0x3c,	/* DCAP		*/
-	0x24,	/* AP		*/
+	0x76,	/* AP		*/
 };
 
 static u8 bq27545_regs[] = {
@@ -471,10 +471,7 @@ static int bq27xxx_battery_read_soc(struct bq27xxx_device_info *di)
 {
 	int soc;
 
-	if (di->chip == BQ27000 || di->chip == BQ27010)
-		soc = bq27xxx_read(di, BQ27XXX_REG_SOC, true);
-	else
-		soc = bq27xxx_read(di, BQ27XXX_REG_SOC, false);
+	soc = bq27xxx_read(di, BQ27XXX_REG_SOC, false);
 
 	if (soc < 0)
 		dev_dbg(di->dev, "error reading State-of-Charge\n");
@@ -539,10 +536,7 @@ static int bq27xxx_battery_read_dcap(struct bq27xxx_device_info *di)
 {
 	int dcap;
 
-	if (di->chip == BQ27000 || di->chip == BQ27010)
-		dcap = bq27xxx_read(di, BQ27XXX_REG_DCAP, true);
-	else
-		dcap = bq27xxx_read(di, BQ27XXX_REG_DCAP, false);
+	dcap = bq27xxx_read(di, BQ27XXX_REG_DCAP, false);
 
 	if (dcap < 0) {
 		dev_dbg(di->dev, "error reading initial last measured discharge\n");
@@ -550,7 +544,7 @@ static int bq27xxx_battery_read_dcap(struct bq27xxx_device_info *di)
 	}
 
 	if (di->chip == BQ27000 || di->chip == BQ27010)
-		dcap = (dcap << 8) * BQ27XXX_CURRENT_CONSTANT / BQ27XXX_RS;
+		dcap *= BQ27XXX_CURRENT_CONSTANT / BQ27XXX_RS;
 	else
 		dcap *= 1000;
 
@@ -716,7 +710,7 @@ static int bq27xxx_battery_read_health(struct bq27xxx_device_info *di)
 	return POWER_SUPPLY_HEALTH_GOOD;
 }
 
-static void bq27xxx_battery_update_unlocked(struct bq27xxx_device_info *di)
+static void bq27xxx_battery_update(struct bq27xxx_device_info *di)
 {
 	struct bq27xxx_reg_cache cache = {0, };
 	bool has_ci_flag = di->chip == BQ27000 || di->chip == BQ27010;
@@ -766,16 +760,6 @@ static void bq27xxx_battery_update_unlocked(struct bq27xxx_device_info *di)
 		di->cache = cache;
 
 	di->last_update = jiffies;
-
-	if (poll_interval > 0)
-		mod_delayed_work(system_wq, &di->work, poll_interval * HZ);
-}
-
-void bq27xxx_battery_update(struct bq27xxx_device_info *di)
-{
-	mutex_lock(&di->lock);
-	bq27xxx_battery_update_unlocked(di);
-	mutex_unlock(&di->lock);
 }
 
 static void bq27xxx_battery_poll(struct work_struct *work)
@@ -785,6 +769,12 @@ static void bq27xxx_battery_poll(struct work_struct *work)
 				     work.work);
 
 	bq27xxx_battery_update(di);
+
+	if (poll_interval > 0) {
+		/* The timer does not have to be accurate. */
+		set_timer_slack(&di->work.timer, poll_interval * HZ / 4);
+		schedule_delayed_work(&di->work, poll_interval * HZ);
+	}
 }
 
 /*
@@ -917,8 +907,10 @@ static int bq27xxx_battery_get_property(struct power_supply *psy,
 	struct bq27xxx_device_info *di = power_supply_get_drvdata(psy);
 
 	mutex_lock(&di->lock);
-	if (time_is_before_jiffies(di->last_update + 5 * HZ))
-		bq27xxx_battery_update_unlocked(di);
+	if (time_is_before_jiffies(di->last_update + 5 * HZ)) {
+		cancel_delayed_work_sync(&di->work);
+		bq27xxx_battery_poll(&di->work.work);
+	}
 	mutex_unlock(&di->lock);
 
 	if (psp != POWER_SUPPLY_PROP_PRESENT && di->cache.flags < 0)
@@ -995,8 +987,8 @@ static void bq27xxx_external_power_changed(struct power_supply *psy)
 {
 	struct bq27xxx_device_info *di = power_supply_get_drvdata(psy);
 
-	/* After charger plug in/out wait 0.5s for things to stabilize */
-	mod_delayed_work(system_wq, &di->work, HZ / 2);
+	cancel_delayed_work_sync(&di->work);
+	schedule_delayed_work(&di->work, 0);
 }
 
 static int __maybe_unused bq27xxx_powersupply_init(struct bq27xxx_device_info *di,

@@ -89,13 +89,16 @@ struct iowarrior {
 	char chip_serial[9];		/* the serial number string of the chip connected */
 	int report_size;		/* number of bytes in a report */
 	u16 product_id;
-	struct usb_anchor submitted;
 };
 
 /*--------------*/
 /*    globals   */
 /*--------------*/
 
+/*
+ *  USB spec identifies 5 second timeouts.
+ */
+#define GET_TIMEOUT 5
 #define USB_REQ_GET_REPORT  0x01
 //#if 0
 static int usb_get_report(struct usb_device *dev,
@@ -107,7 +110,7 @@ static int usb_get_report(struct usb_device *dev,
 			       USB_DIR_IN | USB_TYPE_CLASS |
 			       USB_RECIP_INTERFACE, (type << 8) + id,
 			       inter->desc.bInterfaceNumber, buf, size,
-			       USB_CTRL_GET_TIMEOUT);
+			       GET_TIMEOUT*HZ);
 }
 //#endif
 
@@ -122,7 +125,7 @@ static int usb_set_report(struct usb_interface *intf, unsigned char type,
 			       USB_TYPE_CLASS | USB_RECIP_INTERFACE,
 			       (type << 8) + id,
 			       intf->cur_altsetting->desc.bInterfaceNumber, buf,
-			       size, 1000);
+			       size, HZ);
 }
 
 /*---------------------*/
@@ -245,7 +248,6 @@ static inline void iowarrior_delete(struct iowarrior *dev)
 	kfree(dev->int_in_buffer);
 	usb_free_urb(dev->int_in_urb);
 	kfree(dev->read_queue);
-	usb_put_intf(dev->interface);
 	kfree(dev);
 }
 
@@ -272,45 +274,28 @@ static ssize_t iowarrior_read(struct file *file, char __user *buffer,
 	struct iowarrior *dev;
 	int read_idx;
 	int offset;
-	int retval;
 
 	dev = file->private_data;
 
-	if (file->f_flags & O_NONBLOCK) {
-		retval = mutex_trylock(&dev->mutex);
-		if (!retval)
-			return -EAGAIN;
-	} else {
-		retval = mutex_lock_interruptible(&dev->mutex);
-		if (retval)
-			return -ERESTARTSYS;
-	}
-
 	/* verify that the device wasn't unplugged */
-	if (!dev->present) {
-		retval = -ENODEV;
-		goto exit;
-	}
+	if (dev == NULL || !dev->present)
+		return -ENODEV;
 
 	dev_dbg(&dev->interface->dev, "minor %d, count = %zd\n",
 		dev->minor, count);
 
 	/* read count must be packet size (+ time stamp) */
 	if ((count != dev->report_size)
-	    && (count != (dev->report_size + 1))) {
-		retval = -EINVAL;
-		goto exit;
-	}
+	    && (count != (dev->report_size + 1)))
+		return -EINVAL;
 
 	/* repeat until no buffer overrun in callback handler occur */
 	do {
 		atomic_set(&dev->overflow_flag, 0);
 		if ((read_idx = read_index(dev)) == -1) {
 			/* queue empty */
-			if (file->f_flags & O_NONBLOCK) {
-				retval = -EAGAIN;
-				goto exit;
-			}
+			if (file->f_flags & O_NONBLOCK)
+				return -EAGAIN;
 			else {
 				//next line will return when there is either new data, or the device is unplugged
 				int r = wait_event_interruptible(dev->read_wait,
@@ -321,37 +306,28 @@ static ssize_t iowarrior_read(struct file *file, char __user *buffer,
 								  -1));
 				if (r) {
 					//we were interrupted by a signal
-					retval = -ERESTART;
-					goto exit;
+					return -ERESTART;
 				}
 				if (!dev->present) {
 					//The device was unplugged
-					retval = -ENODEV;
-					goto exit;
+					return -ENODEV;
 				}
 				if (read_idx == -1) {
 					// Can this happen ???
-					retval = 0;
-					goto exit;
+					return 0;
 				}
 			}
 		}
 
 		offset = read_idx * (dev->report_size + 1);
 		if (copy_to_user(buffer, dev->read_queue + offset, count)) {
-			retval = -EFAULT;
-			goto exit;
+			return -EFAULT;
 		}
 	} while (atomic_read(&dev->overflow_flag));
 
 	read_idx = ++read_idx == MAX_INTERRUPT_BUFFER ? 0 : read_idx;
 	atomic_set(&dev->read_idx, read_idx);
-	mutex_unlock(&dev->mutex);
 	return count;
-
-exit:
-	mutex_unlock(&dev->mutex);
-	return retval;
 }
 
 /*
@@ -460,13 +436,11 @@ static ssize_t iowarrior_write(struct file *file,
 			retval = -EFAULT;
 			goto error;
 		}
-		usb_anchor_urb(int_out_urb, &dev->submitted);
 		retval = usb_submit_urb(int_out_urb, GFP_KERNEL);
 		if (retval) {
 			dev_dbg(&dev->interface->dev,
 				"submit error %d for urb nr.%d\n",
 				retval, atomic_read(&dev->write_busy));
-			usb_unanchor_urb(int_out_urb);
 			goto error;
 		}
 		/* submit was ok */
@@ -808,12 +782,10 @@ static int iowarrior_probe(struct usb_interface *interface,
 	init_waitqueue_head(&dev->write_wait);
 
 	dev->udev = udev;
-	dev->interface = usb_get_intf(interface);
+	dev->interface = interface;
 
 	iface_desc = interface->cur_altsetting;
 	dev->product_id = le16_to_cpu(udev->descriptor.idProduct);
-
-	init_usb_anchor(&dev->submitted);
 
 	/* set up the endpoint information */
 	for (i = 0; i < iface_desc->desc.bNumEndpoints; ++i) {
@@ -921,13 +893,15 @@ error:
 static void iowarrior_disconnect(struct usb_interface *interface)
 {
 	struct iowarrior *dev;
+	int minor;
 
 	dev = usb_get_intfdata(interface);
 	mutex_lock(&iowarrior_open_disc_lock);
 	usb_set_intfdata(interface, NULL);
-	mutex_unlock(&iowarrior_open_disc_lock);
-	/* give back our minor - this will call close() locks need to be dropped at this point*/
 
+	minor = dev->minor;
+
+	/* give back our minor */
 	usb_deregister_dev(interface, &iowarrior_class);
 
 	mutex_lock(&dev->mutex);
@@ -935,21 +909,24 @@ static void iowarrior_disconnect(struct usb_interface *interface)
 	/* prevent device read, write and ioctl */
 	dev->present = 0;
 
+	mutex_unlock(&dev->mutex);
+	mutex_unlock(&iowarrior_open_disc_lock);
+
 	if (dev->opened) {
 		/* There is a process that holds a filedescriptor to the device ,
 		   so we only shutdown read-/write-ops going on.
 		   Deleting the device is postponed until close() was called.
 		 */
 		usb_kill_urb(dev->int_in_urb);
-		usb_kill_anchored_urbs(&dev->submitted);
 		wake_up_interruptible(&dev->read_wait);
 		wake_up_interruptible(&dev->write_wait);
-		mutex_unlock(&dev->mutex);
 	} else {
 		/* no process is using the device, cleanup now */
-		mutex_unlock(&dev->mutex);
 		iowarrior_delete(dev);
 	}
+
+	dev_info(&interface->dev, "I/O-Warror #%d now disconnected\n",
+		 minor - IOWARRIOR_MINOR_BASE);
 }
 
 /* usb specific object needed to register this driver with the usb subsystem */

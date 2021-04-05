@@ -672,10 +672,9 @@ int __apply_microcode_amd(struct microcode_amd *mc_amd)
 	return 0;
 }
 
-static enum ucode_state apply_microcode_amd(int cpu)
+int apply_microcode_amd(int cpu)
 {
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
-	enum ucode_state ret = UCODE_UPDATED;
 	struct microcode_amd *mc_amd;
 	struct ucode_cpu_info *uci;
 	struct ucode_patch *p;
@@ -687,39 +686,33 @@ static enum ucode_state apply_microcode_amd(int cpu)
 
 	p = find_patch(cpu);
 	if (!p)
-		return UCODE_NFOUND;
+		return 0;
 
 	mc_amd  = p->data;
 	uci->mc = p->data;
 
 	if (check_current_patch_level(&rev, false))
-		return UCODE_ERROR;
+		return -1;
 
 	/* need to apply patch? */
-	if (rev > mc_amd->hdr.patch_id) {
-		ret = UCODE_OK;
-		goto out;
+	if (rev >= mc_amd->hdr.patch_id) {
+		c->microcode = rev;
+		uci->cpu_sig.rev = rev;
+		return 0;
 	}
 
 	if (__apply_microcode_amd(mc_amd)) {
 		pr_err("CPU%d: update failed for patch_level=0x%08x\n",
 			cpu, mc_amd->hdr.patch_id);
-		return UCODE_ERROR;
+		return -1;
 	}
+	pr_info("CPU%d: new patch_level=0x%08x\n", cpu,
+		mc_amd->hdr.patch_id);
 
-	rev = mc_amd->hdr.patch_id;
+	uci->cpu_sig.rev = mc_amd->hdr.patch_id;
+	c->microcode = mc_amd->hdr.patch_id;
 
-	pr_info("CPU%d: new patch_level=0x%08x\n", cpu, rev);
-
-out:
-	uci->cpu_sig.rev = rev;
-	c->microcode	 = rev;
-
-	/* Update boot_cpu_data's revision too, if we're on the BSP: */
-	if (c->cpu_index == boot_cpu_data.cpu_index)
-		boot_cpu_data.microcode = rev;
-
-	return ret;
+	return 0;
 }
 
 static int install_equiv_cpu_table(const u8 *buf)

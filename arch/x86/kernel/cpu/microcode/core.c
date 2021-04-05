@@ -277,7 +277,7 @@ static int collect_cpu_info(int cpu)
 }
 
 struct apply_microcode_ctx {
-	enum ucode_state err;
+	int err;
 };
 
 static void apply_microcode_local(void *arg)
@@ -392,30 +392,31 @@ static void __exit microcode_dev_exit(void)
 /* fake device for request_firmware */
 static struct platform_device	*microcode_pdev;
 
-static enum ucode_state reload_for_cpu(int cpu)
+static int reload_for_cpu(int cpu)
 {
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
 	enum ucode_state ustate;
+	int err = 0;
 
 	if (!uci->valid)
-		return UCODE_OK;
+		return err;
 
 	ustate = microcode_ops->request_microcode_fw(cpu, &microcode_pdev->dev, true);
-	if (ustate != UCODE_OK)
-		return ustate;
-
-	return apply_microcode_on_target(cpu);
+	if (ustate == UCODE_OK)
+		apply_microcode_on_target(cpu);
+	else
+		if (ustate == UCODE_ERROR)
+			err = -EINVAL;
+	return err;
 }
 
 static ssize_t reload_store(struct device *dev,
 			    struct device_attribute *attr,
 			    const char *buf, size_t size)
 {
-	enum ucode_state tmp_ret = UCODE_OK;
-	bool do_callback = false;
 	unsigned long val;
-	ssize_t ret = 0;
 	int cpu;
+	ssize_t ret = 0, tmp_ret;
 
 	ret = kstrtoul(buf, 0, &val);
 	if (ret)
@@ -428,21 +429,15 @@ static ssize_t reload_store(struct device *dev,
 	mutex_lock(&microcode_mutex);
 	for_each_online_cpu(cpu) {
 		tmp_ret = reload_for_cpu(cpu);
-		if (tmp_ret > UCODE_NFOUND) {
+		if (tmp_ret != 0)
 			pr_warn("Error reloading microcode on CPU %d\n", cpu);
 
-			/* set retval for the first encountered reload error */
-			if (!ret)
-				ret = -EINVAL;
-		}
-
-		if (tmp_ret == UCODE_UPDATED)
-			do_callback = true;
+		/* save retval of the first encountered reload error */
+		if (!ret)
+			ret = tmp_ret;
 	}
-
-	if (!ret && do_callback)
-		microcode_check();
-
+	if (!ret)
+		perf_check_microcode();
 	mutex_unlock(&microcode_mutex);
 	put_online_cpus();
 
@@ -573,9 +568,9 @@ static struct subsys_interface mc_cpu_interface = {
 };
 
 /**
- * microcode_bsp_resume - Update boot CPU microcode during resume.
+ * mc_bp_resume - Update boot CPU microcode during resume.
  */
-void microcode_bsp_resume(void)
+static void mc_bp_resume(void)
 {
 	int cpu = smp_processor_id();
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
@@ -587,7 +582,7 @@ void microcode_bsp_resume(void)
 }
 
 static struct syscore_ops mc_syscore_ops = {
-	.resume			= microcode_bsp_resume,
+	.resume			= mc_bp_resume,
 };
 
 static int

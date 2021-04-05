@@ -479,8 +479,7 @@ static s32 ixgbe_read_iosf_sb_reg_x550(struct ixgbe_hw *hw, u32 reg_addr,
 		error = (command & IXGBE_SB_IOSF_CTRL_CMPL_ERR_MASK) >>
 			 IXGBE_SB_IOSF_CTRL_CMPL_ERR_SHIFT;
 		hw_dbg(hw, "Failed to read, error %x\n", error);
-		ret = IXGBE_ERR_PHY;
-		goto out;
+		return IXGBE_ERR_PHY;
 	}
 
 	if (!ret)

@@ -318,6 +318,39 @@ check_var_size(u32 attributes, unsigned long size)
 	return fops->query_variable_store(attributes, size);
 }
 
+static int efi_status_to_err(efi_status_t status)
+{
+	int err;
+
+	switch (status) {
+	case EFI_SUCCESS:
+		err = 0;
+		break;
+	case EFI_INVALID_PARAMETER:
+		err = -EINVAL;
+		break;
+	case EFI_OUT_OF_RESOURCES:
+		err = -ENOSPC;
+		break;
+	case EFI_DEVICE_ERROR:
+		err = -EIO;
+		break;
+	case EFI_WRITE_PROTECTED:
+		err = -EROFS;
+		break;
+	case EFI_SECURITY_VIOLATION:
+		err = -EACCES;
+		break;
+	case EFI_NOT_FOUND:
+		err = -ENOENT;
+		break;
+	default:
+		err = -EINVAL;
+	}
+
+	return err;
+}
+
 static bool variable_is_present(efi_char16_t *variable_name, efi_guid_t *vendor,
 				struct list_head *head)
 {
@@ -412,7 +445,7 @@ int efivar_init(int (*func)(efi_char16_t *, efi_guid_t, unsigned long, void *),
 		struct list_head *head)
 {
 	const struct efivar_operations *ops = __efivars->ops;
-	unsigned long variable_name_size = 512;
+	unsigned long variable_name_size = 1024;
 	efi_char16_t *variable_name;
 	efi_status_t status;
 	efi_guid_t vendor_guid;
@@ -427,13 +460,12 @@ int efivar_init(int (*func)(efi_char16_t *, efi_guid_t, unsigned long, void *),
 	spin_lock_irq(&__efivars->lock);
 
 	/*
-	 * A small set of old UEFI implementations reject sizes
-	 * above a certain threshold, the lowest seen in the wild
-	 * is 512.
+	 * Per EFI spec, the maximum storage allocated for both
+	 * the variable name and variable data is 1024 bytes.
 	 */
 
 	do {
-		variable_name_size = 512;
+		variable_name_size = 1024;
 
 		status = ops->get_next_variable(&variable_name_size,
 						variable_name,
@@ -475,13 +507,9 @@ int efivar_init(int (*func)(efi_char16_t *, efi_guid_t, unsigned long, void *),
 			break;
 		case EFI_NOT_FOUND:
 			break;
-		case EFI_BUFFER_TOO_SMALL:
-			pr_warn("efivars: Variable name size exceeds maximum (%lu > 512)\n",
-				variable_name_size);
-			status = EFI_NOT_FOUND;
-			break;
 		default:
-			pr_warn("efivars: get_next_variable: status=%lx\n", status);
+			printk(KERN_WARNING "efivars: get_next_variable: status=%lx\n",
+				status);
 			status = EFI_NOT_FOUND;
 			break;
 		}

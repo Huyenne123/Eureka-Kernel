@@ -392,8 +392,7 @@ static int io_submit_init_bio(struct ext4_io_submit *io,
 
 static int io_submit_add_bh(struct ext4_io_submit *io,
 			    struct inode *inode,
-			    struct page *pagecache_page,
-			    struct page *bounce_page,
+			    struct page *page,
 			    struct buffer_head *bh)
 {
 	int ret;
@@ -407,11 +406,10 @@ submit_and_retry:
 		if (ret)
 			return ret;
 	}
-	ret = bio_add_page(io->io_bio, bounce_page ?: pagecache_page,
-			   bh->b_size, bh_offset(bh));
+	ret = bio_add_page(io->io_bio, page, bh->b_size, bh_offset(bh));
 	if (ret != bh->b_size)
 		goto submit_and_retry;
-	wbc_account_io(io->io_wbc, pagecache_page, bh->b_size);
+	wbc_account_io(io->io_wbc, page, bh->b_size);
 	io->io_next_block++;
 	return 0;
 }
@@ -485,9 +483,13 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 	} while ((bh = bh->b_this_page) != head);
 
 	bh = head = page_buffers(page);
-
+#ifdef CONFIG_EXT4_PRIVATE_ENCRYPTION
+	if (ext4_encrypted_inode(inode) && S_ISREG(inode->i_mode) &&
+	    nr_to_submit && !inode->i_mapping->private_enc_mode) {
+#else
 	if (ext4_encrypted_inode(inode) && S_ISREG(inode->i_mode) &&
 	    nr_to_submit) {
+#endif /* CONFIG_EXT4_PRIVATE_ENCRYPTION */
 		gfp_t gfp_flags = GFP_NOFS;
 
 	retry_encrypt:
@@ -511,7 +513,8 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 	do {
 		if (!buffer_async_write(bh))
 			continue;
-		ret = io_submit_add_bh(io, inode, page, data_page, bh);
+		ret = io_submit_add_bh(io, inode,
+				       data_page ? data_page : page, bh);
 		if (ret) {
 			/*
 			 * We only get here on ENOMEM.  Not much else

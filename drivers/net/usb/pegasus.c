@@ -215,8 +215,6 @@ static int update_eth_regs_async(pegasus_t *pegasus)
 			netif_device_detach(pegasus->net);
 		netif_err(pegasus, drv, pegasus->net,
 			  "%s returned %d\n", __func__, ret);
-		usb_free_urb(async_urb);
-		kfree(req);
 	}
 	return ret;
 }
@@ -287,7 +285,7 @@ static void mdio_write(struct net_device *dev, int phy_id, int loc, int val)
 static int read_eprom_word(pegasus_t *pegasus, __u8 index, __u16 *retdata)
 {
 	int i;
-	__u8 tmp = 0;
+	__u8 tmp;
 	__le16 retdatai;
 	int ret;
 
@@ -757,16 +755,12 @@ static inline void disable_net_traffic(pegasus_t *pegasus)
 	set_registers(pegasus, EthCtrl0, sizeof(tmp), &tmp);
 }
 
-static inline int get_interrupt_interval(pegasus_t *pegasus)
+static inline void get_interrupt_interval(pegasus_t *pegasus)
 {
 	u16 data;
 	u8 interval;
-	int ret;
 
-	ret = read_eprom_word(pegasus, 4, &data);
-	if (ret < 0)
-		return ret;
-
+	read_eprom_word(pegasus, 4, &data);
 	interval = data >> 8;
 	if (pegasus->usb->speed != USB_SPEED_HIGH) {
 		if (interval < 0x80) {
@@ -781,8 +775,6 @@ static inline int get_interrupt_interval(pegasus_t *pegasus)
 		}
 	}
 	pegasus->intr_interval = interval;
-
-	return 0;
 }
 
 static void set_carrier(struct net_device *net)
@@ -1198,9 +1190,7 @@ static int pegasus_probe(struct usb_interface *intf,
 				| NETIF_MSG_PROBE | NETIF_MSG_LINK);
 
 	pegasus->features = usb_dev_id[dev_index].private;
-	res = get_interrupt_interval(pegasus);
-	if (res)
-		goto out2;
+	get_interrupt_interval(pegasus);
 	if (reset_mac(pegasus)) {
 		dev_err(&intf->dev, "can't reset MAC\n");
 		res = -EIO;

@@ -226,8 +226,6 @@ static int async_set_registers(rtl8150_t *dev, u16 indx, u16 size, u16 reg)
 		if (res == -ENODEV)
 			netif_device_detach(dev->netdev);
 		dev_err(&dev->udev->dev, "%s failed with %d\n", __func__, res);
-		kfree(req);
-		usb_free_urb(async_urb);
 	}
 	return res;
 }
@@ -279,20 +277,12 @@ static int write_mii_word(rtl8150_t * dev, u8 phy, __u8 indx, u16 reg)
 		return 1;
 }
 
-static void set_ethernet_addr(rtl8150_t *dev)
+static inline void set_ethernet_addr(rtl8150_t * dev)
 {
-	u8 node_id[ETH_ALEN];
-	int ret;
+	u8 node_id[6];
 
-	ret = get_registers(dev, IDR, sizeof(node_id), node_id);
-
-	if (ret == sizeof(node_id)) {
-		ether_addr_copy(dev->netdev->dev_addr, node_id);
-	} else {
-		eth_hw_addr_random(dev->netdev);
-		netdev_notice(dev->netdev, "Assigned a random MAC address: %pM\n",
-			      dev->netdev->dev_addr);
-	}
+	get_registers(dev, IDR, sizeof(node_id), node_id);
+	memcpy(dev->netdev->dev_addr, node_id, sizeof(node_id));
 }
 
 static int rtl8150_set_mac_address(struct net_device *netdev, void *p)
@@ -683,6 +673,7 @@ static void rtl8150_set_multicast(struct net_device *netdev)
 	rtl8150_t *dev = netdev_priv(netdev);
 	u16 rx_creg = 0x9e;
 
+	netif_stop_queue(netdev);
 	if (netdev->flags & IFF_PROMISC) {
 		rx_creg |= 0x0001;
 		dev_info(&netdev->dev, "%s: promiscuous mode\n", netdev->name);
@@ -696,6 +687,7 @@ static void rtl8150_set_multicast(struct net_device *netdev)
 		rx_creg &= 0x00fc;
 	}
 	async_set_registers(dev, RCR, sizeof(rx_creg), rx_creg);
+	netif_wake_queue(netdev);
 }
 
 static netdev_tx_t rtl8150_start_xmit(struct sk_buff *skb,
@@ -704,16 +696,9 @@ static netdev_tx_t rtl8150_start_xmit(struct sk_buff *skb,
 	rtl8150_t *dev = netdev_priv(netdev);
 	int count, res;
 
-	/* pad the frame and ensure terminating USB packet, datasheet 9.2.3 */
-	count = max(skb->len, ETH_ZLEN);
-	if (count % 64 == 0)
-		count++;
-	if (skb_padto(skb, count)) {
-		netdev->stats.tx_dropped++;
-		return NETDEV_TX_OK;
-	}
-
 	netif_stop_queue(netdev);
+	count = (skb->len < 60) ? 60 : skb->len;
+	count = (count & 0x3f) ? count : count + 1;
 	dev->tx_skb = skb;
 	usb_fill_bulk_urb(dev->tx_urb, dev->udev, usb_sndbulkpipe(dev->udev, 2),
 		      skb->data, count, write_bulk_callback, dev);
@@ -809,8 +794,7 @@ static void rtl8150_get_drvinfo(struct net_device *netdev, struct ethtool_drvinf
 static int rtl8150_get_settings(struct net_device *netdev, struct ethtool_cmd *ecmd)
 {
 	rtl8150_t *dev = netdev_priv(netdev);
-	short lpa = 0;
-	short bmcr = 0;
+	short lpa, bmcr;
 
 	ecmd->supported = (SUPPORTED_10baseT_Half |
 			  SUPPORTED_10baseT_Full |

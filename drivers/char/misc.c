@@ -59,7 +59,7 @@ static DEFINE_MUTEX(misc_mtx);
 /*
  * Assigned numbers, used for dynamic minors
  */
-#define DYNAMIC_MINORS 64 /* like dynamic majors */
+#define DYNAMIC_MINORS 96 /* like dynamic majors */
 static DECLARE_BITMAP(misc_minors, DYNAMIC_MINORS);
 
 #ifdef CONFIG_PROC_FS
@@ -125,8 +125,7 @@ static int misc_open(struct inode * inode, struct file * file)
 		}
 	}
 
-	/* Only request module for fixed minor code */
-	if (!new_fops && minor < MISC_DYNAMIC_MINOR) {
+	if (!new_fops) {
 		mutex_unlock(&misc_mtx);
 		request_module("char-major-%d-%d", MISC_MAJOR, minor);
 		mutex_lock(&misc_mtx);
@@ -137,10 +136,9 @@ static int misc_open(struct inode * inode, struct file * file)
 				break;
 			}
 		}
+		if (!new_fops)
+			goto fail;
 	}
-
-	if (!new_fops)
-		goto fail;
 
 	/*
 	 * Place the miscdevice in the file's

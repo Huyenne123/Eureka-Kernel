@@ -57,12 +57,6 @@ static bool enable_6lowpan;
 /* We are listening incoming connections via this channel
  */
 static struct l2cap_chan *listen_chan;
-static DEFINE_MUTEX(set_lock);
-
-enum {
-	LOWPAN_PEER_CLOSING,
-	LOWPAN_PEER_MAXBITS
-};
 
 struct lowpan_peer {
 	struct list_head list;
@@ -72,8 +66,6 @@ struct lowpan_peer {
 	/* peer addresses in various formats */
 	unsigned char eui64_addr[EUI64_ADDR_LEN];
 	struct in6_addr peer_addr;
-
-	DECLARE_BITMAP(flags, LOWPAN_PEER_MAXBITS);
 };
 
 struct lowpan_dev {
@@ -192,16 +184,10 @@ static inline struct lowpan_peer *peer_lookup_dst(struct lowpan_dev *dev,
 	}
 
 	if (!rt) {
-		if (ipv6_addr_any(&lowpan_cb(skb)->gw)) {
-			/* There is neither route nor gateway,
-			 * probably the destination is a direct peer.
-			 */
-			nexthop = daddr;
-		} else {
-			/* There is a known gateway
-			 */
-			nexthop = &lowpan_cb(skb)->gw;
-		}
+		nexthop = &lowpan_cb(skb)->gw;
+
+		if (ipv6_addr_any(nexthop))
+			return NULL;
 	} else {
 		nexthop = rt6_nexthop(rt, daddr);
 
@@ -336,7 +322,6 @@ static int recv_pkt(struct sk_buff *skb, struct net_device *dev,
 		local_skb->pkt_type = PACKET_HOST;
 		local_skb->dev = dev;
 
-		skb_reset_mac_header(local_skb);
 		skb_set_transport_header(local_skb, sizeof(struct ipv6hdr));
 
 		if (give_skb_to_upper(local_skb, dev) != NET_RX_SUCCESS) {
@@ -982,16 +967,11 @@ static struct sk_buff *chan_alloc_skb_cb(struct l2cap_chan *chan,
 					 unsigned long hdr_len,
 					 unsigned long len, int nb)
 {
-	struct sk_buff *skb;
-
 	/* Note that we must allocate using GFP_ATOMIC here as
 	 * this function is called originally from netdev hard xmit
 	 * function in atomic context.
 	 */
-	skb = bt_skb_alloc(hdr_len + len, GFP_ATOMIC);
-	if (!skb)
-		return ERR_PTR(-ENOMEM);
-	return skb;
+	return bt_skb_alloc(hdr_len + len, GFP_ATOMIC);
 }
 
 static void chan_suspend_cb(struct l2cap_chan *chan)
@@ -1140,7 +1120,6 @@ static int get_l2cap_conn(char *buf, bdaddr_t *addr, u8 *addr_type,
 	hci_dev_lock(hdev);
 	hcon = hci_conn_hash_lookup_le(hdev, addr, *addr_type);
 	hci_dev_unlock(hdev);
-	hci_dev_put(hdev);
 
 	if (!hcon)
 		return -ENOENT;
@@ -1155,52 +1134,41 @@ static int get_l2cap_conn(char *buf, bdaddr_t *addr, u8 *addr_type,
 static void disconnect_all_peers(void)
 {
 	struct lowpan_dev *entry;
-	struct lowpan_peer *peer;
-	int nchans;
+	struct lowpan_peer *peer, *tmp_peer, *new_peer;
+	struct list_head peers;
 
-	/* l2cap_chan_close() cannot be called from RCU, and lock ordering
-	 * chan->lock > devices_lock prevents taking write side lock, so copy
-	 * then close.
+	INIT_LIST_HEAD(&peers);
+
+	/* We make a separate list of peers as the close_cb() will
+	 * modify the device peers list so it is better not to mess
+	 * with the same list at the same time.
 	 */
 
 	rcu_read_lock();
-	list_for_each_entry_rcu(entry, &bt_6lowpan_devices, list)
-		list_for_each_entry_rcu(peer, &entry->peers, list)
-			clear_bit(LOWPAN_PEER_CLOSING, peer->flags);
+
+	list_for_each_entry_rcu(entry, &bt_6lowpan_devices, list) {
+		list_for_each_entry_rcu(peer, &entry->peers, list) {
+			new_peer = kmalloc(sizeof(*new_peer), GFP_ATOMIC);
+			if (!new_peer)
+				break;
+
+			new_peer->chan = peer->chan;
+			INIT_LIST_HEAD(&new_peer->list);
+
+			list_add(&new_peer->list, &peers);
+		}
+	}
+
 	rcu_read_unlock();
 
-	do {
-		struct l2cap_chan *chans[32];
-		int i;
+	spin_lock(&devices_lock);
+	list_for_each_entry_safe(peer, tmp_peer, &peers, list) {
+		l2cap_chan_close(peer->chan, ENOENT);
 
-		nchans = 0;
-
-		spin_lock(&devices_lock);
-
-		list_for_each_entry_rcu(entry, &bt_6lowpan_devices, list) {
-			list_for_each_entry_rcu(peer, &entry->peers, list) {
-				if (test_and_set_bit(LOWPAN_PEER_CLOSING,
-						     peer->flags))
-					continue;
-
-				l2cap_chan_hold(peer->chan);
-				chans[nchans++] = peer->chan;
-
-				if (nchans >= ARRAY_SIZE(chans))
-					goto done;
-			}
-		}
-
-done:
-		spin_unlock(&devices_lock);
-
-		for (i = 0; i < nchans; ++i) {
-			l2cap_chan_lock(chans[i]);
-			l2cap_chan_close(chans[i], ENOENT);
-			l2cap_chan_unlock(chans[i]);
-			l2cap_chan_put(chans[i]);
-		}
-	} while (nchans);
+		list_del_rcu(&peer->list);
+		kfree_rcu(peer, rcu);
+	}
+	spin_unlock(&devices_lock);
 }
 
 struct set_enable {
@@ -1221,14 +1189,12 @@ static void do_enable_set(struct work_struct *work)
 
 	enable_6lowpan = set_enable->flag;
 
-	mutex_lock(&set_lock);
 	if (listen_chan) {
 		l2cap_chan_close(listen_chan, 0);
 		l2cap_chan_put(listen_chan);
 	}
 
 	listen_chan = bt_6lowpan_listen();
-	mutex_unlock(&set_lock);
 
 	kfree(set_enable);
 }
@@ -1280,13 +1246,11 @@ static ssize_t lowpan_control_write(struct file *fp,
 		if (ret == -EINVAL)
 			return ret;
 
-		mutex_lock(&set_lock);
 		if (listen_chan) {
 			l2cap_chan_close(listen_chan, 0);
 			l2cap_chan_put(listen_chan);
 			listen_chan = NULL;
 		}
-		mutex_unlock(&set_lock);
 
 		if (conn) {
 			struct lowpan_peer *peer;

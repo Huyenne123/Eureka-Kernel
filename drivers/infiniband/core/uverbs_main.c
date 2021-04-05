@@ -343,12 +343,8 @@ static ssize_t ib_uverbs_event_read(struct file *filp, char __user *buf,
 	spin_lock_irq(&file->lock);
 
 	while (list_empty(&file->event_list)) {
-		if (!file->uverbs_file->device->ib_dev) {
-			spin_unlock_irq(&file->lock);
-			return -EIO;
-		}
-
 		spin_unlock_irq(&file->lock);
+
 		if (filp->f_flags & O_NONBLOCK)
 			return -EAGAIN;
 
@@ -360,6 +356,11 @@ static ssize_t ib_uverbs_event_read(struct file *filp, char __user *buf,
 			 */
 					     !file->uverbs_file->device->ib_dev)))
 			return -ERESTARTSYS;
+
+		/* If device was disassociated and no event exists set an error */
+		if (list_empty(&file->event_list) &&
+		    !file->uverbs_file->device->ib_dev)
+			return -EIO;
 
 		spin_lock_irq(&file->lock);
 	}

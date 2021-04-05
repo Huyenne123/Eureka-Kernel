@@ -103,10 +103,6 @@ void interrupt_end(void)
 		tracehook_notify_resume(regs);
 }
 
-void exit_thread(void)
-{
-}
-
 int get_current_pid(void)
 {
 	return task_pid_nr(current);
@@ -211,7 +207,7 @@ void arch_cpu_idle(void)
 	local_irq_enable();
 }
 
-int __uml_cant_sleep(void) {
+int __cant_sleep(void) {
 	return in_atomic() || irqs_disabled() || in_interrupt();
 	/* Is in_interrupt() really needed? */
 }

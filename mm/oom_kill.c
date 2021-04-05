@@ -1,6 +1,6 @@
 /*
  *  linux/mm/oom_kill.c
- *
+ * 
  *  Copyright (C)  1998,2000  Rik van Riel
  *	Thanks go out to Claus Fischer for some serious inspiration and
  *	for goading me into coding this file...
@@ -339,6 +339,11 @@ static struct task_struct *select_bad_process(struct oom_control *oc,
 	return chosen;
 }
 
+#if defined(CONFIG_ZSWAP)
+extern u64 zswap_pool_pages;
+extern atomic_t zswap_stored_pages;
+#endif
+
 /**
  * dump_tasks - dump current memory state of all system tasks
  * @memcg: current's memory controller, if constrained
@@ -350,12 +355,23 @@ static struct task_struct *select_bad_process(struct oom_control *oc,
  * State information includes task's pid, uid, tgid, vm size, rss, nr_ptes,
  * swapents, oom_score_adj value, and name.
  */
-static void dump_tasks(struct mem_cgroup *memcg, const nodemask_t *nodemask)
+void dump_tasks(struct mem_cgroup *memcg, const nodemask_t *nodemask)
 {
 	struct task_struct *p;
 	struct task_struct *task;
+#if defined(CONFIG_ZSWAP)
+	int zswap_stored_pages_temp;
+	unsigned long zswap_pool_pages_temp;
+	unsigned long tasksize_swap;
+#endif
 
+#if defined(CONFIG_ZSWAP)
+	zswap_stored_pages_temp = atomic_read(&zswap_stored_pages);
+	zswap_pool_pages_temp = zswap_pool_pages;
+	pr_info("[ pid ]   uid  tgid total_vm total_rss (   rss     swap  ) nr_ptes nr_pmds swapents oom_score_adj name\n");
+#else
 	pr_info("[ pid ]   uid  tgid total_vm      rss nr_ptes nr_pmds swapents oom_score_adj name\n");
+#endif
 	rcu_read_lock();
 	for_each_process(p) {
 		if (oom_unkillable_task(p, memcg, nodemask))
@@ -371,9 +387,26 @@ static void dump_tasks(struct mem_cgroup *memcg, const nodemask_t *nodemask)
 			continue;
 		}
 
+#if defined(CONFIG_ZSWAP)
+		if (zswap_stored_pages_temp)
+			tasksize_swap = zswap_pool_pages_temp
+					* get_mm_counter(task->mm, MM_SWAPENTS)
+					/ zswap_stored_pages_temp;
+		else
+			tasksize_swap = 0;
+		pr_info("[%5d] %5d %5d %8lu  %8lu (%8lu %8lu) %7ld %7ld %8lu         %5hd %s\n",
+#else
 		pr_info("[%5d] %5d %5d %8lu %8lu %7ld %7ld %8lu         %5hd %s\n",
+#endif
+
 			task->pid, from_kuid(&init_user_ns, task_uid(task)),
-			task->tgid, task->mm->total_vm, get_mm_rss(task->mm),
+			task->tgid, task->mm->total_vm,
+#if defined(CONFIG_ZSWAP)
+			get_mm_rss(task->mm) + tasksize_swap,
+			get_mm_rss(task->mm), tasksize_swap,
+#else
+			get_mm_rss(task->mm),
+#endif
 			atomic_long_read(&task->mm->nr_ptes),
 			mm_nr_pmds(task->mm),
 			get_mm_counter(task->mm, MM_SWAPENTS),
@@ -386,8 +419,7 @@ static void dump_tasks(struct mem_cgroup *memcg, const nodemask_t *nodemask)
 static void dump_header(struct oom_control *oc, struct task_struct *p,
 			struct mem_cgroup *memcg)
 {
-	pr_warning("%s invoked oom-killer: gfp_mask=0x%x, order=%d, "
-		"oom_score_adj=%hd\n",
+	pr_warning("%s invoked oom-killer: gfp_mask=0x%x, order=%d, oom_score_adj=%hd\n",
 		current->comm, oc->gfp_mask, oc->order,
 		current->signal->oom_score_adj);
 	cpuset_print_current_mems_allowed();
@@ -745,22 +777,34 @@ bool out_of_memory(struct oom_control *oc)
 }
 
 /*
- * The pagefault handler calls here because some allocation has failed. We have
- * to take care of the memcg OOM here because this is the only safe context without
- * any locks held but let the oom killer triggered from the allocation context care
- * about the global OOM.
+ * The pagefault handler calls here because it is out of memory, so kill a
+ * memory-hogging task.  If any populated zone has ZONE_OOM_LOCKED set, a
+ * parallel oom killing is already in progress so do nothing.
  */
 void pagefault_out_of_memory(void)
 {
-	static DEFINE_RATELIMIT_STATE(pfoom_rs, DEFAULT_RATELIMIT_INTERVAL,
-				      DEFAULT_RATELIMIT_BURST);
+	struct oom_control oc = {
+		.zonelist = NULL,
+		.nodemask = NULL,
+		.gfp_mask = 0,
+		.order = 0,
+	};
 
 	if (mem_cgroup_oom_synchronize(true))
 		return;
 
-	if (fatal_signal_pending(current))
+	if (!mutex_trylock(&oom_lock))
 		return;
 
-	if (__ratelimit(&pfoom_rs))
-		pr_warn("Huh VM_FAULT_OOM leaked out to the #PF handler. Retrying PF\n");
+	if (!out_of_memory(&oc)) {
+		/*
+		 * There shouldn't be any user tasks runnable while the
+		 * OOM killer is disabled, so the current task has to
+		 * be a racing OOM victim for which oom_killer_disable()
+		 * is waiting for.
+		 */
+		WARN_ON(test_thread_flag(TIF_MEMDIE));
+	}
+
+	mutex_unlock(&oom_lock);
 }

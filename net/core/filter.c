@@ -431,15 +431,8 @@ do_pass:
 				break;
 
 			if (fp->code == (BPF_ALU | BPF_DIV | BPF_X) ||
-			    fp->code == (BPF_ALU | BPF_MOD | BPF_X)) {
+			    fp->code == (BPF_ALU | BPF_MOD | BPF_X))
 				*insn++ = BPF_MOV32_REG(BPF_REG_X, BPF_REG_X);
-				/* Error with exception code on div/mod by 0.
-				 * For cBPF programs, this was always return 0.
-				 */
-				*insn++ = BPF_JMP_IMM(BPF_JNE, BPF_REG_X, 0, 2);
-				*insn++ = BPF_ALU32_REG(BPF_XOR, BPF_REG_A, BPF_REG_A);
-				*insn++ = BPF_EXIT_INSN();
-			}
 
 			*insn = BPF_RAW_INSN(fp->code, BPF_REG_A, BPF_REG_X, 0, fp->k);
 			break;
@@ -749,17 +742,6 @@ static bool chk_code_allowed(u16 code_to_probe)
 	return codes[code_to_probe];
 }
 
-static bool bpf_check_basics_ok(const struct sock_filter *filter,
-				unsigned int flen)
-{
-	if (filter == NULL)
-		return false;
-	if (flen == 0 || flen > BPF_MAXINSNS)
-		return false;
-
-	return true;
-}
-
 /**
  *	bpf_check_classic - verify socket filter code
  *	@filter: filter to verify
@@ -779,6 +761,9 @@ static int bpf_check_classic(const struct sock_filter *filter,
 {
 	bool anc_found;
 	int pc;
+
+	if (flen == 0 || flen > BPF_MAXINSNS)
+		return -EINVAL;
 
 	/* Check the filter code now */
 	for (pc = 0; pc < flen; pc++) {
@@ -1072,7 +1057,7 @@ int bpf_prog_create(struct bpf_prog **pfp, struct sock_fprog_kern *fprog)
 	struct bpf_prog *fp;
 
 	/* Make sure new filter is there and in the right amounts. */
-	if (!bpf_check_basics_ok(fprog->filter, fprog->len))
+	if (fprog->filter == NULL)
 		return -EINVAL;
 
 	fp = bpf_prog_alloc(bpf_prog_size(fprog->len), 0);
@@ -1119,7 +1104,7 @@ int bpf_prog_create_from_user(struct bpf_prog **pfp, struct sock_fprog *fprog,
 	int err;
 
 	/* Make sure new filter is there and in the right amounts. */
-	if (!bpf_check_basics_ok(fprog->filter, fprog->len))
+	if (fprog->filter == NULL)
 		return -EINVAL;
 
 	fp = bpf_prog_alloc(bpf_prog_size(fprog->len), 0);
@@ -1199,6 +1184,7 @@ int __sk_attach_filter(struct sock_fprog *fprog, struct sock *sk,
 		       bool locked)
 {
 	unsigned int fsize = bpf_classic_proglen(fprog);
+	unsigned int bpf_fsize = bpf_prog_size(fprog->len);
 	struct bpf_prog *prog;
 	int err;
 
@@ -1206,10 +1192,10 @@ int __sk_attach_filter(struct sock_fprog *fprog, struct sock *sk,
 		return -EPERM;
 
 	/* Make sure new filter is there and in the right amounts. */
-	if (!bpf_check_basics_ok(fprog->filter, fprog->len))
+	if (fprog->filter == NULL)
 		return -EINVAL;
 
-	prog = bpf_prog_alloc(bpf_prog_size(fprog->len), 0);
+	prog = bpf_prog_alloc(bpf_fsize, 0);
 	if (!prog)
 		return -ENOMEM;
 

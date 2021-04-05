@@ -345,7 +345,6 @@ static int vidi_get_modes(struct drm_connector *connector)
 	struct vidi_context *ctx = ctx_from_connector(connector);
 	struct edid *edid;
 	int edid_len;
-	int count;
 
 	/*
 	 * the edid data comes from user side and it would be set
@@ -365,11 +364,7 @@ static int vidi_get_modes(struct drm_connector *connector)
 
 	drm_mode_connector_update_edid_property(connector, edid);
 
-	count = drm_add_edid_modes(connector, edid);
-
-	kfree(edid);
-
-	return count;
+	return drm_add_edid_modes(connector, edid);
 }
 
 static struct drm_encoder *vidi_best_encoder(struct drm_connector *connector)
@@ -544,6 +539,8 @@ static int vidi_remove(struct platform_device *pdev)
 	if (ctx->raw_edid != (struct edid *)fake_edid_info) {
 		kfree(ctx->raw_edid);
 		ctx->raw_edid = NULL;
+
+		return -EINVAL;
 	}
 
 	component_del(&pdev->dev, &vidi_component_ops);

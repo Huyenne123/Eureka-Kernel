@@ -2556,7 +2556,7 @@ static void at76_disconnect(struct usb_interface *interface)
 
 	wiphy_info(priv->hw->wiphy, "disconnecting\n");
 	at76_delete_device(priv);
-	usb_put_dev(interface_to_usbdev(interface));
+	usb_put_dev(priv->udev);
 	dev_info(&interface->dev, "disconnected\n");
 }
 
@@ -2582,8 +2582,8 @@ static int __init at76_mod_init(void)
 	if (result < 0)
 		printk(KERN_ERR DRIVER_NAME
 		       ": usb_register failed (status %d)\n", result);
-	else
-		led_trigger_register_simple("at76_usb-tx", &ledtrig_tx);
+
+	led_trigger_register_simple("at76_usb-tx", &ledtrig_tx);
 	return result;
 }
 

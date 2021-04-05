@@ -167,7 +167,6 @@ static int vexpress_sysreg_probe(struct platform_device *pdev)
 	struct bgpio_chip *mmc_gpio_chip;
 	int master;
 	u32 dt_hbi;
-	int ret;
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!mem)
@@ -203,9 +202,7 @@ static int vexpress_sysreg_probe(struct platform_device *pdev)
 	bgpio_init(mmc_gpio_chip, &pdev->dev, 0x4, base + SYS_MCI,
 			NULL, NULL, NULL, NULL, 0);
 	mmc_gpio_chip->gc.ngpio = 2;
-	ret = gpiochip_add(&mmc_gpio_chip->gc);
-	if (ret)
-		return ret;
+	gpiochip_add(&mmc_gpio_chip->gc);
 
 	return mfd_add_devices(&pdev->dev, PLATFORM_DEVID_AUTO,
 			vexpress_sysreg_cells,

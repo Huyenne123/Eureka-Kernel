@@ -1953,8 +1953,7 @@ static int btrfs_issue_discard(struct block_device *bdev, u64 start, u64 len,
 	u64 bytes_left, end;
 	u64 aligned_start = ALIGN(start, 1 << 9);
 
-	/* Adjust the range to be aligned to 512B sectors if necessary. */
-	if (start != aligned_start) {
+	if (WARN_ON(start != aligned_start)) {
 		len -= aligned_start - start;
 		len = round_down(len, 1 << 9);
 		start = aligned_start;
@@ -4580,7 +4579,7 @@ static void shrink_delalloc(struct btrfs_root *root, u64 to_reclaim, u64 orig,
 
 	/* Calc the number of the pages we need flush for space reservation */
 	items = calc_reclaim_items_nr(root, to_reclaim);
-	to_reclaim = (u64)items * EXTENT_SIZE_PER_ITEM;
+	to_reclaim = items * EXTENT_SIZE_PER_ITEM;
 
 	trans = (struct btrfs_trans_handle *)current->journal_info;
 	block_rsv = &root->fs_info->delalloc_block_rsv;
@@ -7169,14 +7168,6 @@ search:
 			 */
 			if ((flags & extra) && !(block_group->flags & extra))
 				goto loop;
-
-			/*
-			 * This block group has different flags than we want.
-			 * It's possible that we have MIXED_GROUP flag but no
-			 * block group is mixed.  Just skip such block group.
-			 */
-			btrfs_release_block_group(block_group, delalloc);
-			continue;
 		}
 
 have_block_group:
@@ -8038,7 +8029,6 @@ struct extent_buffer *btrfs_alloc_tree_block(struct btrfs_trans_handle *trans,
 out_free_delayed:
 	btrfs_free_delayed_extent_op(extent_op);
 out_free_buf:
-	btrfs_tree_unlock(buf);
 	free_extent_buffer(buf);
 out_free_reserved:
 	btrfs_free_reserved_extent(root, ins.objectid, ins.offset, 0);
@@ -8116,15 +8106,7 @@ static noinline void reada_walk_down(struct btrfs_trans_handle *trans,
 		/* We don't care about errors in readahead. */
 		if (ret < 0)
 			continue;
-
-		/*
-		 * This could be racey, it's conceivable that we raced and end
-		 * up with a bogus refs count, if that's the case just skip, if
-		 * we are actually corrupt we will notice when we look up
-		 * everything again with our locks.
-		 */
-		if (refs == 0)
-			continue;
+		BUG_ON(refs == 0);
 
 		if (wc->stage == DROP_REFERENCE) {
 			if (refs == 1)
@@ -8430,11 +8412,7 @@ static noinline int walk_down_proc(struct btrfs_trans_handle *trans,
 		BUG_ON(ret == -ENOMEM);
 		if (ret)
 			return ret;
-		if (unlikely(wc->refs[level] == 0)) {
-			btrfs_err(root->fs_info, "bytenr %llu has 0 references, expect > 0",
-				  eb->start);
-			return -EUCLEAN;
-		}
+		BUG_ON(wc->refs[level] == 0);
 	}
 
 	if (wc->stage == DROP_REFERENCE) {
@@ -8537,9 +8515,8 @@ static noinline int do_walk_down(struct btrfs_trans_handle *trans,
 		goto out_unlock;
 
 	if (unlikely(wc->refs[level - 1] == 0)) {
-		btrfs_err(root->fs_info, "bytenr %llu has 0 references, expect > 0",
-			  bytenr);
-		ret = -EUCLEAN;
+		btrfs_err(root->fs_info, "Missing references.");
+		ret = -EIO;
 		goto out_unlock;
 	}
 	*lookup_info = 0;
@@ -8706,12 +8683,7 @@ static noinline int walk_up_proc(struct btrfs_trans_handle *trans,
 				path->locks[level] = 0;
 				return ret;
 			}
-			if (unlikely(wc->refs[level] == 0)) {
-				btrfs_tree_unlock_rw(eb, path->locks[level]);
-				btrfs_err(root->fs_info, "bytenr %llu has 0 references, expect > 0",
-					  eb->start);
-				return -EUCLEAN;
-			}
+			BUG_ON(wc->refs[level] == 0);
 			if (wc->refs[level] == 1) {
 				btrfs_tree_unlock_rw(eb, path->locks[level]);
 				path->locks[level] = 0;
@@ -9925,7 +9897,6 @@ int btrfs_read_block_groups(struct btrfs_root *root)
 			btrfs_err(info,
 "bg %llu is a mixed block group but filesystem hasn't enabled mixed block groups",
 				  cache->key.objectid);
-			btrfs_put_block_group(cache);
 			ret = -EINVAL;
 			goto error;
 		}
@@ -10708,7 +10679,7 @@ int btrfs_init_space_info(struct btrfs_fs_info *fs_info)
 
 	disk_super = fs_info->super_copy;
 	if (!btrfs_super_root(disk_super))
-		return -EINVAL;
+		return 1;
 
 	features = btrfs_super_incompat_flags(disk_super);
 	if (features & BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS)
@@ -10759,9 +10730,9 @@ int btrfs_error_unpin_extent_range(struct btrfs_root *root, u64 start, u64 end)
  * transaction.
  */
 static int btrfs_trim_free_extents(struct btrfs_device *device,
-				   struct fstrim_range *range, u64 *trimmed)
+				   u64 minlen, u64 *trimmed)
 {
-	u64 start = range->start, len = 0;
+	u64 start = 0, len = 0;
 	int ret;
 
 	*trimmed = 0;
@@ -10797,8 +10768,8 @@ static int btrfs_trim_free_extents(struct btrfs_device *device,
 			atomic_inc(&trans->use_count);
 		spin_unlock(&fs_info->trans_lock);
 
-		ret = find_free_dev_extent_start(trans, device, range->minlen,
-						 start, &start, &len);
+		ret = find_free_dev_extent_start(trans, device, minlen, start,
+						 &start, &len);
 		if (trans)
 			btrfs_put_transaction(trans);
 
@@ -10810,16 +10781,6 @@ static int btrfs_trim_free_extents(struct btrfs_device *device,
 			break;
 		}
 
-		/* If we are out of the passed range break */
-		if (start > range->start + range->len - 1) {
-			mutex_unlock(&fs_info->chunk_mutex);
-			ret = 0;
-			break;
-		}
-
-		start = max(range->start, start);
-		len = min(range->len, len);
-
 		ret = btrfs_issue_discard(device->bdev, start, len, &bytes);
 		up_read(&fs_info->commit_root_sem);
 		mutex_unlock(&fs_info->chunk_mutex);
@@ -10829,10 +10790,6 @@ static int btrfs_trim_free_extents(struct btrfs_device *device,
 
 		start += len;
 		*trimmed += bytes;
-
-		/* We've trimmed enough */
-		if (*trimmed >= range->len)
-			break;
 
 		if (fatal_signal_pending(current)) {
 			ret = -ERESTARTSYS;
@@ -10900,7 +10857,8 @@ int btrfs_trim_fs(struct btrfs_root *root, struct fstrim_range *range)
 	mutex_lock(&root->fs_info->fs_devices->device_list_mutex);
 	devices = &root->fs_info->fs_devices->devices;
 	list_for_each_entry(device, devices, dev_list) {
-		ret = btrfs_trim_free_extents(device, range, &group_trimmed);
+		ret = btrfs_trim_free_extents(device, range->minlen,
+					      &group_trimmed);
 		if (ret)
 			break;
 

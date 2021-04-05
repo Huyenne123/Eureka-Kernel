@@ -36,7 +36,6 @@
 #include <asm/delay.h>
 #include <linux/atomic.h>
 #include <linux/jump_label.h>
-#include <linux/nospec.h>
 #include "kvm_cache_regs.h"
 #include "irq.h"
 #include "trace.h"
@@ -536,11 +535,9 @@ static inline bool pv_eoi_enabled(struct kvm_vcpu *vcpu)
 static bool pv_eoi_get_pending(struct kvm_vcpu *vcpu)
 {
 	u8 val;
-	if (pv_eoi_get_user(vcpu, &val) < 0) {
+	if (pv_eoi_get_user(vcpu, &val) < 0)
 		apic_debug("Can't read EOI MSR value: 0x%llx\n",
 			   (unsigned long long)vcpu->arch.pv_eoi.msr_val);
-		return false;
-	}
 	return val & 0x1;
 }
 
@@ -1435,21 +1432,15 @@ static int apic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 	case APIC_LVTTHMR:
 	case APIC_LVTPC:
 	case APIC_LVT1:
-	case APIC_LVTERR: {
+	case APIC_LVTERR:
 		/* TODO: Check vector */
-		size_t size;
-		u32 index;
-
 		if (!kvm_apic_sw_enabled(apic))
 			val |= APIC_LVT_MASKED;
 
-		size = ARRAY_SIZE(apic_lvt_mask);
-		index = array_index_nospec(
-				(reg - APIC_LVTT) >> 4, size);
-		val &= apic_lvt_mask[index];
+		val &= apic_lvt_mask[(reg - APIC_LVTT) >> 4];
 		apic_set_reg(apic, reg, val);
+
 		break;
-	}
 
 	case APIC_LVTT:
 		if (!kvm_apic_sw_enabled(apic))
@@ -1756,17 +1747,13 @@ int kvm_apic_local_deliver(struct kvm_lapic *apic, int lvt_type)
 {
 	u32 reg = kvm_apic_get_reg(apic, lvt_type);
 	int vector, mode, trig_mode;
-	int r;
 
 	if (kvm_apic_hw_enabled(apic) && !(reg & APIC_LVT_MASKED)) {
 		vector = reg & APIC_VECTOR_MASK;
 		mode = reg & APIC_MODE_MASK;
 		trig_mode = reg & APIC_LVT_LEVEL_TRIGGER;
-
-		r = __apic_accept_irq(apic, mode, vector, 1, trig_mode, NULL);
-		if (r && lvt_type == APIC_LVTPC)
-			apic_set_reg(apic, APIC_LVTPC, reg | APIC_LVT_MASKED);
-		return r;
+		return __apic_accept_irq(apic, mode, vector, 1, trig_mode,
+					NULL);
 	}
 	return 0;
 }
@@ -1791,7 +1778,7 @@ static enum hrtimer_restart apic_timer_fn(struct hrtimer *data)
 
 	apic_timer_expired(apic);
 
-	if (lapic_is_periodic(apic) && !WARN_ON_ONCE(!apic->lapic_timer.period)) {
+	if (lapic_is_periodic(apic)) {
 		hrtimer_add_expires_ns(&ktimer->timer, ktimer->period);
 		return HRTIMER_RESTART;
 	} else

@@ -268,7 +268,7 @@ static struct smack_known *smk_fetch(const char *name, struct inode *ip,
 	if (ip->i_op->getxattr == NULL)
 		return ERR_PTR(-EOPNOTSUPP);
 
-	buffer = kzalloc(SMK_LONGLABEL, GFP_NOFS);
+	buffer = kzalloc(SMK_LONGLABEL, GFP_KERNEL);
 	if (buffer == NULL)
 		return ERR_PTR(-ENOMEM);
 
@@ -932,8 +932,7 @@ static int smack_bprm_set_creds(struct linux_binprm *bprm)
 
 		if (rc != 0)
 			return rc;
-	}
-	if (bprm->unsafe & ~LSM_UNSAFE_PTRACE)
+	} else if (bprm->unsafe)
 		return -EPERM;
 
 	bsp->smk_task = isp->smk_task;
@@ -1307,8 +1306,7 @@ static int smack_inode_setxattr(struct dentry *dentry, const char *name,
 		check_star = 1;
 	} else if (strcmp(name, XATTR_NAME_SMACKTRANSMUTE) == 0) {
 		check_priv = 1;
-		if (!S_ISDIR(d_backing_inode(dentry)->i_mode) ||
-		    size != TRANS_TRUE_SIZE ||
+		if (size != TRANS_TRUE_SIZE ||
 		    strncmp(value, TRANS_TRUE, TRANS_TRUE_SIZE) != 0)
 			rc = -EINVAL;
 	} else
@@ -1514,6 +1512,8 @@ static int smack_inode_getsecurity(const struct inode *inode,
  * @inode: the object
  * @buffer: where they go
  * @buffer_size: size of buffer
+ *
+ * Returns 0 on success, -EINVAL otherwise
  */
 static int smack_inode_listsecurity(struct inode *inode, char *buffer,
 				    size_t buffer_size)
@@ -2229,6 +2229,25 @@ static int smack_task_kill(struct task_struct *p, struct siginfo *info,
 }
 
 /**
+ * smack_task_wait - Smack access check for waiting
+ * @p: task to wait for
+ *
+ * Returns 0
+ */
+static int smack_task_wait(struct task_struct *p)
+{
+	/*
+	 * Allow the operation to succeed.
+	 * Zombies are bad.
+	 * In userless environments (e.g. phones) programs
+	 * get marked with SMACK64EXEC and even if the parent
+	 * and child shouldn't be talking the parent still
+	 * may expect to know when the child exits.
+	 */
+	return 0;
+}
+
+/**
  * smack_task_to_inode - copy task smack into the inode blob
  * @p: task to copy from
  * @inode: inode to copy to
@@ -2241,6 +2260,7 @@ static void smack_task_to_inode(struct task_struct *p, struct inode *inode)
 	struct smack_known *skp = smk_of_task_struct(p);
 
 	isp->smk_inode = skp;
+	isp->smk_flags |= SMK_INODE_INSTANT;
 }
 
 /*
@@ -2499,7 +2519,7 @@ static int smk_ipv6_check(struct smack_known *subject,
 #ifdef CONFIG_AUDIT
 	smk_ad_init_net(&ad, __func__, LSM_AUDIT_DATA_NET, &net);
 	ad.a.u.net->family = PF_INET6;
-	ad.a.u.net->dport = address->sin6_port;
+	ad.a.u.net->dport = ntohs(address->sin6_port);
 	if (act == SMK_RECEIVING)
 		ad.a.u.net->v6info.saddr = address->sin6_addr;
 	else
@@ -2668,15 +2688,6 @@ static int smack_inode_setsecurity(struct inode *inode, const char *name,
 
 	if (value == NULL || size > SMK_LONGLABEL || size == 0)
 		return -EINVAL;
-
-	if (strcmp(name, XATTR_SMACK_TRANSMUTE) == 0) {
-		if (!S_ISDIR(inode->i_mode) || size != TRANS_TRUE_SIZE ||
-		    strncmp(value, TRANS_TRUE, TRANS_TRUE_SIZE) != 0)
-			return -EINVAL;
-
-		nsp->smk_flags |= SMK_INODE_TRANSMUTE;
-		return 0;
-	}
 
 	skp = smk_import_entry(value, size);
 	if (IS_ERR(skp))
@@ -3671,18 +3682,12 @@ static int smack_unix_stream_connect(struct sock *sock,
 		}
 	}
 
+	/*
+	 * Cross reference the peer labels for SO_PEERSEC.
+	 */
 	if (rc == 0) {
-		/*
-		 * Cross reference the peer labels for SO_PEERSEC.
-		 */
 		nsp->smk_packet = ssp->smk_out;
 		ssp->smk_packet = osp->smk_out;
-
-		/*
-		 * new/child/established socket must inherit listening socket labels
-		 */
-		nsp->smk_out = osp->smk_out;
-		nsp->smk_in  = osp->smk_in;
 	}
 
 	return rc;
@@ -3981,8 +3986,6 @@ access_check:
 			skp = smack_ipv6host_label(&sadd);
 		if (skp == NULL)
 			skp = smack_net_ambient;
-		if (skb == NULL)
-			break;
 #ifdef CONFIG_AUDIT
 		smk_ad_init_net(&ad, __func__, LSM_AUDIT_DATA_NET, &net);
 		ad.a.u.net->family = sk->sk_family;
@@ -4224,7 +4227,7 @@ access_check:
 	rcu_read_unlock();
 
 	if (hskp == NULL)
-		rc = netlbl_req_setattr(req, &ssp->smk_out->smk_netlabel);
+		rc = netlbl_req_setattr(req, &skp->smk_netlabel);
 	else
 		netlbl_req_delattr(req);
 
@@ -4641,6 +4644,7 @@ static struct security_hook_list smack_hooks[] = {
 	LSM_HOOK_INIT(task_getscheduler, smack_task_getscheduler),
 	LSM_HOOK_INIT(task_movememory, smack_task_movememory),
 	LSM_HOOK_INIT(task_kill, smack_task_kill),
+	LSM_HOOK_INIT(task_wait, smack_task_wait),
 	LSM_HOOK_INIT(task_to_inode, smack_task_to_inode),
 
 	LSM_HOOK_INIT(ipc_permission, smack_ipc_permission),

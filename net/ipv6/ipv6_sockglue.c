@@ -48,6 +48,10 @@
 #include <net/addrconf.h>
 #include <net/inet_common.h>
 #include <net/tcp.h>
+#ifdef CONFIG_MPTCP
+#include <net/mptcp.h>
+#include <net/mptcp_v4.h>
+#endif
 #include <net/udp.h>
 #include <net/udplite.h>
 #include <net/xfrm.h>
@@ -67,6 +71,8 @@ int ip6_ra_control(struct sock *sk, int sel)
 		return -ENOPROTOOPT;
 
 	new_ra = (sel >= 0) ? kmalloc(sizeof(*new_ra), GFP_KERNEL) : NULL;
+	if (sel >= 0 && !new_ra)
+		return -ENOMEM;
 
 	write_lock_bh(&ip6_ra_lock);
 	for (rap = &ip6_ra_chain; (ra = *rap) != NULL; rap = &ra->next) {
@@ -121,7 +127,6 @@ struct ipv6_txoptions *ipv6_update_options(struct sock *sk,
 static bool setsockopt_needs_rtnl(int optname)
 {
 	switch (optname) {
-	case IPV6_ADDRFORM:
 	case IPV6_ADD_MEMBERSHIP:
 	case IPV6_DROP_MEMBERSHIP:
 	case IPV6_JOIN_ANYCAST:
@@ -166,18 +171,15 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 		rtnl_lock();
 	lock_sock(sk);
 
-	/* Another thread has converted the socket into IPv4 with
-	 * IPV6_ADDRFORM concurrently.
-	 */
-	if (unlikely(sk->sk_family != AF_INET6))
-		goto unlock;
-
 	switch (optname) {
 
 	case IPV6_ADDRFORM:
 		if (optlen < sizeof(int))
 			goto e_inval;
 		if (val == PF_INET) {
+			struct ipv6_txoptions *opt;
+			struct sk_buff *pktopt;
+
 			if (sk->sk_type == SOCK_RAW)
 				break;
 
@@ -188,14 +190,8 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 					retv = -EBUSY;
 					break;
 				}
-			} else if (sk->sk_protocol == IPPROTO_TCP) {
-				if (sk->sk_prot != &tcpv6_prot) {
-					retv = -EBUSY;
-					break;
-				}
-			} else {
+			} else if (sk->sk_protocol != IPPROTO_TCP)
 				break;
-			}
 
 			if (sk->sk_state != TCP_ESTABLISHED) {
 				retv = -ENOTCONN;
@@ -208,8 +204,8 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 				break;
 			}
 
-			__ipv6_sock_mc_close(sk);
-			__ipv6_sock_ac_close(sk);
+			fl6_free_socklist(sk);
+			ipv6_sock_mc_close(sk);
 
 			/*
 			 * Sock is moving from IPv6 to IPv4 (sk_prot), so
@@ -224,10 +220,13 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 				sock_prot_inuse_add(net, sk->sk_prot, -1);
 				sock_prot_inuse_add(net, &tcp_prot, 1);
 				local_bh_enable();
-				/* Paired with READ_ONCE(sk->sk_prot) in inet6_stream_ops */
-				WRITE_ONCE(sk->sk_prot, &tcp_prot);
-				/* Paired with READ_ONCE() in tcp_(get|set)sockopt() */
-				WRITE_ONCE(icsk->icsk_af_ops, &ipv4_specific);
+				sk->sk_prot = &tcp_prot;
+#ifdef CONFIG_MPTCP
+				if (sock_flag(sk, SOCK_MPTCP))
+					icsk->icsk_af_ops = &mptcp_v4_specific;
+				else
+#endif
+				icsk->icsk_af_ops = &ipv4_specific;
 				sk->sk_socket->ops = &inet_stream_ops;
 				sk->sk_family = PF_INET;
 				tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);
@@ -240,21 +239,25 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 				sock_prot_inuse_add(net, sk->sk_prot, -1);
 				sock_prot_inuse_add(net, prot, 1);
 				local_bh_enable();
-				/* Paired with READ_ONCE(sk->sk_prot) in inet6_dgram_ops */
-				WRITE_ONCE(sk->sk_prot, prot);
+				sk->sk_prot = prot;
 				sk->sk_socket->ops = &inet_dgram_ops;
 				sk->sk_family = PF_INET;
 			}
+			opt = xchg((__force struct ipv6_txoptions **)&np->opt,
+				   NULL);
+			if (opt) {
+				atomic_sub(opt->tot_len, &sk->sk_omem_alloc);
+				txopt_put(opt);
+			}
+			pktopt = xchg(&np->pktoptions, NULL);
+			kfree_skb(pktopt);
 
-			/* Disable all options not to allocate memory anymore,
-			 * but there is still a race.  See the lockless path
-			 * in udpv6_sendmsg() and ipv6_local_rxpmtu().
-			 */
-			np->rxopt.all = 0;
-
-			inet6_cleanup_sock(sk);
-
-			sk->sk_destruct = inet_sock_destruct;
+#ifdef CONFIG_MPTCP
+			if (is_meta_sk(sk))
+				sk->sk_destruct = mptcp_sock_destruct;
+			else
+#endif
+				sk->sk_destruct = inet_sock_destruct;
 			/*
 			 * ... and add it to the refcnt debug socks count
 			 * in the new family. -acme
@@ -420,8 +423,7 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 		if (optname != IPV6_RTHDR && !ns_capable(net->user_ns, CAP_NET_RAW))
 			break;
 
-		opt = rcu_dereference_protected(np->opt,
-						lockdep_sock_is_held(sk));
+		opt = rcu_dereference_protected(np->opt, sock_owned_by_user(sk));
 		opt = ipv6_renew_options(sk, opt, optname,
 					 (struct ipv6_opt_hdr __user *)optval,
 					 optlen);
@@ -891,7 +893,6 @@ pref_skip_coa:
 		break;
 	}
 
-unlock:
 	release_sock(sk);
 	if (needs_rtnl)
 		rtnl_unlock();
@@ -1140,8 +1141,7 @@ static int do_ipv6_getsockopt(struct sock *sk, int level, int optname,
 		struct ipv6_txoptions *opt;
 
 		lock_sock(sk);
-		opt = rcu_dereference_protected(np->opt,
-						lockdep_sock_is_held(sk));
+		opt = rcu_dereference_protected(np->opt, sock_owned_by_user(sk));
 		len = ipv6_getsockopt_sticky(sk, opt, optname, optval, len);
 		release_sock(sk);
 		/* check if ipv6_getsockopt_sticky() returns err code */

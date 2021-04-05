@@ -799,13 +799,11 @@ static void mxs_auart_set_ldisc(struct uart_port *port,
 
 static irqreturn_t mxs_auart_irq_handle(int irq, void *context)
 {
-	u32 istat, stat;
+	u32 istat;
 	struct mxs_auart_port *s = context;
 	u32 mctrl_temp = s->mctrl_prev;
+	u32 stat = readl(s->port.membase + AUART_STAT);
 
-	uart_port_lock(&s->port);
-
-	stat = readl(s->port.membase + AUART_STAT);
 	istat = readl(s->port.membase + AUART_INTR);
 
 	/* ack irq */
@@ -844,8 +842,6 @@ static irqreturn_t mxs_auart_irq_handle(int irq, void *context)
 		mxs_auart_tx_chars(s);
 		istat &= ~AUART_INTR_TXIS;
 	}
-
-	uart_port_unlock(&s->port);
 
 	return IRQ_HANDLED;
 }
@@ -1252,9 +1248,8 @@ static int mxs_auart_request_gpio_irq(struct mxs_auart_port *s)
 
 	/*
 	 * If something went wrong, rollback.
-	 * Be careful: i may be unsigned.
 	 */
-	while (err && (i-- > 0))
+	while (err && (--i >= 0))
 		if (irq[i] >= 0)
 			free_irq(irq[i], s);
 

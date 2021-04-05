@@ -495,9 +495,7 @@ static int umh_pipe_setup(struct subprocess_info *info, struct cred *new)
 {
 	struct file *files[2];
 	struct coredump_params *cp = (struct coredump_params *)info->data;
-	int err;
-
-	err = create_pipe_files(files, 0);
+	int err = create_pipe_files(files, 0);
 	if (err)
 		return err;
 
@@ -505,13 +503,10 @@ static int umh_pipe_setup(struct subprocess_info *info, struct cred *new)
 
 	err = replace_fd(0, files[0], 0);
 	fput(files[0]);
-	if (err < 0)
-		return err;
-
 	/* and disallow core files too */
 	current->signal->rlim[RLIMIT_CORE] = (struct rlimit){1, 1};
 
-	return 0;
+	return err;
 }
 
 void do_coredump(const siginfo_t *siginfo)
@@ -725,7 +720,7 @@ void do_coredump(const siginfo_t *siginfo)
 			goto close_fail;
 		if (!(cprm.file->f_mode & FMODE_CAN_WRITE))
 			goto close_fail;
-		if (do_truncate(cprm.file->f_path.dentry, 0, 0, cprm.file))
+		if (do_truncate2(cprm.file->f_path.mnt, cprm.file->f_path.dentry, 0, 0, cprm.file))
 			goto close_fail;
 	}
 

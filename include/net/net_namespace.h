@@ -16,6 +16,9 @@
 #include <net/netns/packet.h>
 #include <net/netns/ipv4.h>
 #include <net/netns/ipv6.h>
+#ifdef CONFIG_MPTCP
+	#include <net/netns/mptcp.h>
+#endif
 #include <net/netns/ieee802154_6lowpan.h>
 #include <net/netns/sctp.h>
 #include <net/netns/dccp.h>
@@ -53,7 +56,6 @@ struct net {
 						 */
 	spinlock_t		rules_mod_lock;
 
-	u32			hash_mix;
 	atomic64_t		cookie_gen;
 
 	struct list_head	list;		/* list of network namespaces */
@@ -95,6 +97,11 @@ struct net {
 	struct netns_ipv4	ipv4;
 #if IS_ENABLED(CONFIG_IPV6)
 	struct netns_ipv6	ipv6;
+#endif
+#ifdef CONFIG_MPTCP
+	#if IS_ENABLED(CONFIG_MPTCP)
+		struct netns_mptcp	mptcp;
+	#endif
 #endif
 #if IS_ENABLED(CONFIG_IEEE802154_6LOWPAN)
 	struct netns_ieee802154_lowpan	ieee802154_lowpan;
@@ -251,30 +258,21 @@ static inline int check_net(const struct net *net)
 
 typedef struct {
 #ifdef CONFIG_NET_NS
-	struct net __rcu *net;
+	struct net *net;
 #endif
 } possible_net_t;
 
 static inline void write_pnet(possible_net_t *pnet, struct net *net)
 {
 #ifdef CONFIG_NET_NS
-	rcu_assign_pointer(pnet->net, net);
+	pnet->net = net;
 #endif
 }
 
 static inline struct net *read_pnet(const possible_net_t *pnet)
 {
 #ifdef CONFIG_NET_NS
-	return rcu_dereference_protected(pnet->net, true);
-#else
-	return &init_net;
-#endif
-}
-
-static inline struct net *read_pnet_rcu(const possible_net_t *pnet)
-{
-#ifdef CONFIG_NET_NS
-	return rcu_dereference(pnet->net);
+	return pnet->net;
 #else
 	return &init_net;
 #endif

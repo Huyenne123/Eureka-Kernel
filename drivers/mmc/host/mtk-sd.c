@@ -447,25 +447,23 @@ static inline void msdc_dma_setup(struct msdc_host *host, struct msdc_dma *dma,
 	writel((u32)dma->gpd_addr, host->base + MSDC_DMA_SA);
 }
 
-static void msdc_prepare_data(struct msdc_host *host, struct mmc_data *data)
+static void msdc_prepare_data(struct msdc_host *host, struct mmc_request *mrq)
 {
+	struct mmc_data *data = mrq->data;
+
 	if (!(data->host_cookie & MSDC_PREPARE_FLAG)) {
 		bool read = (data->flags & MMC_DATA_READ) != 0;
 
+		data->host_cookie |= MSDC_PREPARE_FLAG;
 		data->sg_count = dma_map_sg(host->dev, data->sg, data->sg_len,
 					   read ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
-		if (data->sg_count)
-			data->host_cookie |= MSDC_PREPARE_FLAG;
 	}
 }
 
-static bool msdc_data_prepared(struct mmc_data *data)
+static void msdc_unprepare_data(struct msdc_host *host, struct mmc_request *mrq)
 {
-	return data->host_cookie & MSDC_PREPARE_FLAG;
-}
+	struct mmc_data *data = mrq->data;
 
-static void msdc_unprepare_data(struct msdc_host *host, struct mmc_data *data)
-{
 	if (data->host_cookie & MSDC_ASYNC_FLAG)
 		return;
 
@@ -722,20 +720,20 @@ static void msdc_track_cmd_data(struct msdc_host *host,
 static void msdc_request_done(struct msdc_host *host, struct mmc_request *mrq)
 {
 	unsigned long flags;
+	bool ret;
 
-	/*
-	 * No need check the return value of cancel_delayed_work, as only ONE
-	 * path will go here!
-	 */
-	cancel_delayed_work(&host->req_timeout);
-
+	ret = cancel_delayed_work(&host->req_timeout);
+	if (!ret) {
+		/* delay work already running */
+		return;
+	}
 	spin_lock_irqsave(&host->lock, flags);
 	host->mrq = NULL;
 	spin_unlock_irqrestore(&host->lock, flags);
 
 	msdc_track_cmd_data(host, mrq->cmd, mrq->data);
 	if (mrq->data)
-		msdc_unprepare_data(host, mrq->data);
+		msdc_unprepare_data(host, mrq);
 	mmc_request_done(host->mmc, mrq);
 
 	pm_runtime_mark_last_busy(host->dev);
@@ -749,7 +747,7 @@ static bool msdc_cmd_done(struct msdc_host *host, int events,
 	bool done = false;
 	bool sbc_error;
 	unsigned long flags;
-	u32 *rsp;
+	u32 *rsp = cmd->resp;
 
 	if (mrq->sbc && cmd == mrq->cmd &&
 	    (events & (MSDC_INT_ACMDRDY | MSDC_INT_ACMDCRCERR
@@ -770,7 +768,6 @@ static bool msdc_cmd_done(struct msdc_host *host, int events,
 
 	if (done)
 		return true;
-	rsp = cmd->resp;
 
 	sdr_clr_bits(host->base + MSDC_INTEN, cmd_ints_mask);
 
@@ -849,7 +846,6 @@ static void msdc_start_command(struct msdc_host *host,
 	WARN_ON(host->cmd);
 	host->cmd = cmd;
 
-	mod_delayed_work(system_wq, &host->req_timeout, DAT_TIMEOUT);
 	if (!msdc_cmd_is_ready(host, mrq, cmd))
 		return;
 
@@ -861,6 +857,7 @@ static void msdc_start_command(struct msdc_host *host,
 
 	cmd->error = 0;
 	rawcmd = msdc_cmd_prepare_raw_cmd(host, mrq, cmd);
+	mod_delayed_work(system_wq, &host->req_timeout, DAT_TIMEOUT);
 
 	sdr_set_bits(host->base + MSDC_INTEN, cmd_ints_mask);
 	writel(cmd->arg, host->base + SDC_ARG);
@@ -890,18 +887,8 @@ static void msdc_ops_request(struct mmc_host *mmc, struct mmc_request *mrq)
 
 	pm_runtime_get_sync(host->dev);
 
-	if (mrq->data) {
-		msdc_prepare_data(host, mrq->data);
-		if (!msdc_data_prepared(mrq->data)) {
-			/*
-			 * Failed to prepare DMA area, fail fast before
-			 * starting any commands.
-			 */
-			mrq->cmd->error = -ENOSPC;
-			mmc_request_done(mmc, mrq);
-			return;
-		}
-	}
+	if (mrq->data)
+		msdc_prepare_data(host, mrq);
 
 	/* if SBC is required, we have HW option and SW option.
 	 * if HW option is enabled, and SBC does not have "special" flags,
@@ -923,7 +910,7 @@ static void msdc_pre_req(struct mmc_host *mmc, struct mmc_request *mrq,
 	if (!data)
 		return;
 
-	msdc_prepare_data(host, data);
+	msdc_prepare_data(host, mrq);
 	data->host_cookie |= MSDC_ASYNC_FLAG;
 }
 
@@ -931,14 +918,14 @@ static void msdc_post_req(struct mmc_host *mmc, struct mmc_request *mrq,
 		int err)
 {
 	struct msdc_host *host = mmc_priv(mmc);
-	struct mmc_data *data = mrq->data;
+	struct mmc_data *data;
 
+	data = mrq->data;
 	if (!data)
 		return;
-
 	if (data->host_cookie) {
 		data->host_cookie &= ~MSDC_ASYNC_FLAG;
-		msdc_unprepare_data(host, data);
+		msdc_unprepare_data(host, mrq);
 	}
 }
 
@@ -955,7 +942,7 @@ static void msdc_data_xfer_next(struct msdc_host *host,
 static bool msdc_data_xfer_done(struct msdc_host *host, u32 events,
 				struct mmc_request *mrq, struct mmc_data *data)
 {
-	struct mmc_command *stop;
+	struct mmc_command *stop = data->stop;
 	unsigned long flags;
 	bool done;
 	unsigned int check_data = events &
@@ -971,7 +958,6 @@ static bool msdc_data_xfer_done(struct msdc_host *host, u32 events,
 
 	if (done)
 		return true;
-	stop = data->stop;
 
 	if (check_data || (stop && stop->error)) {
 		dev_dbg(host->dev, "DMA status: 0x%8X\n",
@@ -1519,7 +1505,7 @@ static int msdc_drv_probe(struct platform_device *pdev)
 
 	host->irq = platform_get_irq(pdev, 0);
 	if (host->irq < 0) {
-		ret = host->irq;
+		ret = -EINVAL;
 		goto host_free;
 	}
 

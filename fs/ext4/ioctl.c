@@ -18,6 +18,10 @@
 #include "ext4_jbd2.h"
 #include "ext4.h"
 
+#ifdef CONFIG_EXT4CRYPT_SDP
+#include "sdp/fscrypto_sdp_ioctl.h"
+#endif
+
 #define MAX_32_NUM ((((unsigned long long) 1) << 32) - 1)
 
 /**
@@ -105,7 +109,7 @@ static long swap_inode_boot_loader(struct super_block *sb,
 	if (!inode_owner_or_capable(inode) || !capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	inode_bl = ext4_iget(sb, EXT4_BOOT_LOADER_INO, EXT4_IGET_SPECIAL);
+	inode_bl = ext4_iget(sb, EXT4_BOOT_LOADER_INO);
 	if (IS_ERR(inode_bl))
 		return PTR_ERR(inode_bl);
 	ei_bl = EXT4_I(inode_bl);
@@ -135,7 +139,7 @@ static long swap_inode_boot_loader(struct super_block *sb,
 	/* Protect extent tree against block allocations via delalloc */
 	ext4_double_down_write_data_sem(inode, inode_bl);
 
-	if (is_bad_inode(inode_bl) || !S_ISREG(inode_bl->i_mode)) {
+	if (inode_bl->i_nlink == 0) {
 		/* this inode has never been used as a BOOT_LOADER */
 		set_nlink(inode_bl, 1);
 		i_uid_write(inode_bl, 0);
@@ -144,7 +148,6 @@ static long swap_inode_boot_loader(struct super_block *sb,
 		ei_bl->i_flags = 0;
 		inode_bl->i_version = 1;
 		i_size_write(inode_bl, 0);
-		EXT4_I(inode_bl)->i_disksize = inode_bl->i_size;
 		inode_bl->i_mode = S_IFREG;
 		if (ext4_has_feature_extents(sb)) {
 			ext4_set_inode_flag(inode_bl, EXT4_INODE_EXTENTS);
@@ -578,7 +581,7 @@ group_add_out:
 		if (err == 0)
 			err = err2;
 		mnt_drop_write_file(filp);
-		if (!err && (o_group < EXT4_SB(sb)->s_groups_count) &&
+		if (!err && (o_group > EXT4_SB(sb)->s_groups_count) &&
 		    ext4_has_group_desc_csum(sb) &&
 		    test_opt(sb, INIT_INODE_TABLE))
 			err = ext4_register_li_request(sb, o_group);
@@ -588,11 +591,13 @@ resizefs_out:
 		return err;
 	}
 
+	case FIDTRIM:
 	case FITRIM:
 	{
 		struct request_queue *q = bdev_get_queue(sb->s_bdev);
 		struct fstrim_range range;
 		int ret = 0;
+		int flags  = cmd == FIDTRIM ? BLKDEV_DISCARD_SECURE : 0;
 
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
@@ -600,18 +605,15 @@ resizefs_out:
 		if (!blk_queue_discard(q))
 			return -EOPNOTSUPP;
 
-		/*
-		 * We haven't replayed the journal, so we cannot use our
-		 * block-bitmap-guided storage zapping commands.
-		 */
-		if (test_opt(sb, NOLOAD) && ext4_has_feature_journal(sb))
-			return -EROFS;
-
+		if ((flags & BLKDEV_DISCARD_SECURE) && !blk_queue_secdiscard(q))
+			return -EOPNOTSUPP;
 		if (copy_from_user(&range, (struct fstrim_range __user *)arg,
 		    sizeof(range)))
 			return -EFAULT;
 
-		ret = ext4_trim_fs(sb, &range);
+		range.minlen = max((unsigned int)range.minlen,
+				   q->limits.discard_granularity);
+		ret = ext4_trim_fs(sb, &range, flags);
 		if (ret < 0)
 			return ret;
 
@@ -627,9 +629,6 @@ resizefs_out:
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
 		struct ext4_encryption_policy policy;
 		int err = 0;
-
-		if (!ext4_has_feature_encrypt(sb))
-			return -EOPNOTSUPP;
 
 		if (copy_from_user(&policy,
 				   (struct ext4_encryption_policy __user *)arg,
@@ -674,10 +673,7 @@ encryption_policy_out:
 			err = ext4_journal_get_write_access(handle, sbi->s_sbh);
 			if (err)
 				goto pwsalt_err_journal;
-			lock_buffer(sbi->s_sbh);
 			generate_random_uuid(sbi->s_es->s_encrypt_pw_salt);
-			ext4_superblock_csum_set(sb);
-			unlock_buffer(sbi->s_sbh);
 			err = ext4_handle_dirty_metadata(handle, NULL,
 							 sbi->s_sbh);
 		pwsalt_err_journal:
@@ -711,6 +707,15 @@ encryption_policy_out:
 		return -EOPNOTSUPP;
 #endif
 	}
+#ifdef CONFIG_EXT4CRYPT_SDP
+	case EXT4_IOC_GET_SDP_INFO:
+	case EXT4_IOC_SET_SDP_POLICY:
+	case EXT4_IOC_SET_SENSITIVE:
+	case EXT4_IOC_SET_PROTECTED:
+	case EXT4_IOC_ADD_CHAMBER:
+	case EXT4_IOC_REMOVE_CHAMBER:
+		return fscrypt_sdp_ioctl(filp, cmd, arg);
+#endif
 	default:
 		return -ENOTTY;
 	}
@@ -777,6 +782,14 @@ long ext4_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case EXT4_IOC_SET_ENCRYPTION_POLICY:
 	case EXT4_IOC_GET_ENCRYPTION_PWSALT:
 	case EXT4_IOC_GET_ENCRYPTION_POLICY:
+#ifdef CONFIG_EXT4CRYPT_SDP
+	case EXT4_IOC_GET_SDP_INFO:
+	case EXT4_IOC_SET_SDP_POLICY:
+	case EXT4_IOC_SET_SENSITIVE:
+	case EXT4_IOC_SET_PROTECTED:
+	case EXT4_IOC_ADD_CHAMBER:
+	case EXT4_IOC_REMOVE_CHAMBER:
+#endif
 		break;
 	default:
 		return -ENOIOCTLCMD;

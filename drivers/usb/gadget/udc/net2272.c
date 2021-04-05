@@ -962,7 +962,6 @@ net2272_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 			break;
 	}
 	if (&req->req != _req) {
-		ep->stopped = stopped;
 		spin_unlock_irqrestore(&ep->dev->lock, flags);
 		return -EINVAL;
 	}
@@ -2655,7 +2654,7 @@ net2272_plat_probe(struct platform_device *pdev)
 		goto err_req;
 	}
 
-	ret = net2272_probe_fin(dev, irqflags);
+	ret = net2272_probe_fin(dev, IRQF_TRIGGER_LOW);
 	if (ret)
 		goto err_io;
 
@@ -2670,8 +2669,6 @@ net2272_plat_probe(struct platform_device *pdev)
  err_req:
 	release_mem_region(base, len);
  err:
-	kfree(dev);
-
 	return ret;
 }
 

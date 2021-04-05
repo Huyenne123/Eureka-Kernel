@@ -602,6 +602,10 @@ static int prepare_uprobe(struct uprobe *uprobe, struct file *file,
 	if (ret)
 		goto out;
 
+	/* uprobe_write_opcode() assumes we don't cross page boundary */
+	BUG_ON((uprobe->offset & ~PAGE_MASK) +
+			UPROBE_SWBP_INSN_SIZE > PAGE_SIZE);
+
 	smp_wmb(); /* pairs with the smp_rmb() in handle_swbp() */
 	set_bit(UPROBE_COPY_INSN, &uprobe->flags);
 
@@ -878,13 +882,6 @@ int uprobe_register(struct inode *inode, loff_t offset, struct uprobe_consumer *
 		return -EIO;
 	/* Racy, just to catch the obvious mistakes */
 	if (offset > i_size_read(inode))
-		return -EINVAL;
-
-	/*
-	 * This ensures that copy_from_page() and copy_to_page()
-	 * can't cross page boundary.
-	 */
-	if (!IS_ALIGNED(offset, UPROBE_SWBP_INSN_SIZE))
 		return -EINVAL;
 
  retry:
@@ -1172,7 +1169,7 @@ static struct xol_area *__create_xol_area(unsigned long vaddr)
 	uprobe_opcode_t insn = UPROBE_SWBP_INSN;
 	struct xol_area *area;
 
-	area = kzalloc(sizeof(*area), GFP_KERNEL);
+	area = kmalloc(sizeof(*area), GFP_KERNEL);
 	if (unlikely(!area))
 		goto out;
 
@@ -1182,7 +1179,7 @@ static struct xol_area *__create_xol_area(unsigned long vaddr)
 
 	area->xol_mapping.name = "[uprobes]";
 	area->xol_mapping.pages = area->pages;
-	area->pages[0] = alloc_page(GFP_HIGHUSER | __GFP_ZERO);
+	area->pages[0] = alloc_page(GFP_HIGHUSER);
 	if (!area->pages[0])
 		goto free_bitmap;
 	area->pages[1] = NULL;
@@ -1695,9 +1692,6 @@ static int is_trap_at_addr(struct mm_struct *mm, unsigned long vaddr)
 	uprobe_opcode_t opcode;
 	int result;
 
-	if (WARN_ON_ONCE(!IS_ALIGNED(vaddr, UPROBE_SWBP_INSN_SIZE)))
-		return -EINVAL;
-
 	pagefault_disable();
 	result = __copy_from_user_inatomic(&opcode, (void __user*)vaddr,
 							sizeof(opcode));
@@ -1842,7 +1836,7 @@ static void handle_trampoline(struct pt_regs *regs)
 
  sigill:
 	uprobe_warn(current, "handle uretprobe, sending SIGILL.");
-	force_sig(SIGILL, current);
+	force_sig_info(SIGILL, SEND_SIG_FORCED, current);
 
 }
 
@@ -1875,7 +1869,7 @@ static void handle_swbp(struct pt_regs *regs)
 	if (!uprobe) {
 		if (is_swbp > 0) {
 			/* No matching uprobe; signal SIGTRAP. */
-			force_sig(SIGTRAP, current);
+			send_sig(SIGTRAP, current, 0);
 		} else {
 			/*
 			 * Either we raced with uprobe_unregister() or we can't
@@ -1919,13 +1913,6 @@ static void handle_swbp(struct pt_regs *regs)
 
 	handler_chain(uprobe, regs);
 
-	/*
-	 * If user decided to take execution elsewhere, it makes little sense
-	 * to execute the original instruction, so let's skip it.
-	 */
-	if (instruction_pointer(regs) != bp_vaddr)
-		goto out;
-
 	if (arch_uprobe_skip_sstep(&uprobe->arch, regs))
 		goto out;
 
@@ -1965,7 +1952,7 @@ static void handle_singlestep(struct uprobe_task *utask, struct pt_regs *regs)
 
 	if (unlikely(err)) {
 		uprobe_warn(current, "execute the probed insn, sending SIGILL.");
-		force_sig(SIGILL, current);
+		force_sig_info(SIGILL, SEND_SIG_FORCED, current);
 	}
 }
 

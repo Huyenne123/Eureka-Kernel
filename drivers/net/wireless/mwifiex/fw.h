@@ -148,7 +148,6 @@ enum MWIFIEX_802_11_PRIVACY_FILTER {
 #define TLV_TYPE_STA_MAC_ADDR       (PROPRIETARY_TLV_BASE_ID + 32)
 #define TLV_TYPE_BSSID              (PROPRIETARY_TLV_BASE_ID + 35)
 #define TLV_TYPE_CHANNELBANDLIST    (PROPRIETARY_TLV_BASE_ID + 42)
-#define TLV_TYPE_UAP_MAC_ADDRESS    (PROPRIETARY_TLV_BASE_ID + 43)
 #define TLV_TYPE_UAP_BEACON_PERIOD  (PROPRIETARY_TLV_BASE_ID + 44)
 #define TLV_TYPE_UAP_DTIM_PERIOD    (PROPRIETARY_TLV_BASE_ID + 45)
 #define TLV_TYPE_UAP_BCAST_SSID     (PROPRIETARY_TLV_BASE_ID + 48)
@@ -748,7 +747,7 @@ struct mwifiex_ietypes_chanstats {
 struct mwifiex_ie_types_wildcard_ssid_params {
 	struct mwifiex_ie_types_header header;
 	u8 max_ssid_length;
-	u8 ssid[];
+	u8 ssid[1];
 } __packed;
 
 #define TSF_DATA_SIZE            8
@@ -849,7 +848,7 @@ struct mwifiex_tkip_param {
 struct mwifiex_aes_param {
 	u8 pn[WPA_PN_SIZE];
 	__le16 key_len;
-	u8 key[WLAN_KEY_LEN_CCMP_256];
+	u8 key[WLAN_KEY_LEN_CCMP];
 } __packed;
 
 struct mwifiex_wapi_param {
@@ -1440,7 +1439,7 @@ struct host_cmd_ds_802_11_scan_rsp {
 
 struct host_cmd_ds_802_11_scan_ext {
 	u32   reserved;
-	u8    tlv_buffer[];
+	u8    tlv_buffer[1];
 } __packed;
 
 struct mwifiex_ie_types_bss_mode {
@@ -1590,10 +1589,9 @@ struct mwifiex_ie_types_wmm_queue_status {
 struct ieee_types_vendor_header {
 	u8 element_id;
 	u8 len;
-	struct {
-		u8 oui[3];
-		u8 oui_type;
-	} __packed oui;
+	u8 oui[4];	/* 0~2: oui, 3: oui_type */
+	u8 oui_subtype;
+	u8 version;
 } __packed;
 
 struct ieee_types_wmm_parameter {
@@ -1607,9 +1605,6 @@ struct ieee_types_wmm_parameter {
 	 *   Version     [1]
 	 */
 	struct ieee_types_vendor_header vend_hdr;
-	u8 oui_subtype;
-	u8 version;
-
 	u8 qos_info_bitmap;
 	u8 reserved;
 	struct ieee_types_wmm_ac_parameters ac_params[IEEE80211_NUM_ACS];
@@ -1627,8 +1622,6 @@ struct ieee_types_wmm_info {
 	 *   Version     [1]
 	 */
 	struct ieee_types_vendor_header vend_hdr;
-	u8 oui_subtype;
-	u8 version;
 
 	u8 qos_info_bitmap;
 } __packed;

@@ -507,7 +507,7 @@ static int cfg80211_sme_connect(struct wireless_dev *wdev,
 	if (wdev->current_bss)
 		return -EALREADY;
 
-	if (wdev->conn)
+	if (WARN_ON(wdev->conn))
 		return -EINPROGRESS;
 
 	wdev->conn = kzalloc(sizeof(*wdev->conn), GFP_KERNEL);
@@ -1025,9 +1025,6 @@ int cfg80211_connect(struct cfg80211_registered_device *rdev,
 				connect->crypto.ciphers_pairwise[0] = cipher;
 			}
 		}
-	} else {
-		if (WARN_ON(connkeys))
-			return -EINVAL;
 	}
 
 	wdev->connect_keys = connkeys;

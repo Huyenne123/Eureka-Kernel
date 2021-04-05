@@ -452,10 +452,7 @@ static ssize_t usbtmc_read(struct file *filp, char __user *buf,
 	if (!buffer)
 		return -ENOMEM;
 
-	retval = mutex_lock_interruptible(&data->io_mutex);
-	if (retval < 0)
-		goto exit_nolock;
-
+	mutex_lock(&data->io_mutex);
 	if (data->zombie) {
 		retval = -ENODEV;
 		goto exit;
@@ -614,7 +611,6 @@ static ssize_t usbtmc_read(struct file *filp, char __user *buf,
 
 exit:
 	mutex_unlock(&data->io_mutex);
-exit_nolock:
 	kfree(buffer);
 	return retval;
 }

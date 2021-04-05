@@ -23,12 +23,21 @@
 #include <linux/rcupdate.h>
 #include <linux/workqueue.h>
 
+#if defined(CONFIG_SEC_FD_DETECT)
+extern void save_open_close_fdinfo(int fd, int flag, struct task_struct *cur, struct files_struct *files);
+extern void check_fd_invalid_close(int fd, struct task_struct *cur, struct files_struct *files, struct file *file);
+#endif // END CONFIG_SEC_FD_DETECT
+
 int sysctl_nr_open __read_mostly = 1024*1024;
 int sysctl_nr_open_min = BITS_PER_LONG;
 /* our max() is unusable in constant expressions ;-/ */
 #define __const_max(x, y) ((x) < (y) ? (x) : (y))
 int sysctl_nr_open_max = __const_max(INT_MAX, ~(size_t)0/sizeof(void *)) &
 			 -BITS_PER_LONG;
+
+#ifdef CONFIG_SEC_DEBUG_FILE_LEAK
+extern void sec_debug_EMFILE_error_proc(unsigned long files_addr);
+#endif
 
 static void *alloc_fdmem(size_t size)
 {
@@ -88,7 +97,7 @@ static void copy_fd_bitmaps(struct fdtable *nfdt, struct fdtable *ofdt,
  */
 static void copy_fdtable(struct fdtable *nfdt, struct fdtable *ofdt)
 {
-	size_t cpy, set;
+	unsigned int cpy, set;
 
 	BUG_ON(nfdt->max_fds < ofdt->max_fds);
 
@@ -100,17 +109,9 @@ static void copy_fdtable(struct fdtable *nfdt, struct fdtable *ofdt)
 	copy_fd_bitmaps(nfdt, ofdt, ofdt->max_fds);
 }
 
-/*
- * Note how the fdtable bitmap allocations very much have to be a multiple of
- * BITS_PER_LONG. This is not only because we walk those things in chunks of
- * 'unsigned long' in some places, but simply because that is how the Linux
- * kernel bitmaps are defined to work: they are not "bits in an array of bytes",
- * they are very much "bits in an array of unsigned long".
- */
-static struct fdtable *alloc_fdtable(unsigned int slots_wanted)
+static struct fdtable * alloc_fdtable(unsigned int nr)
 {
 	struct fdtable *fdt;
-	unsigned int nr;
 	void *data;
 
 	/*
@@ -118,47 +119,21 @@ static struct fdtable *alloc_fdtable(unsigned int slots_wanted)
 	 * Allocation steps are keyed to the size of the fdarray, since it
 	 * grows far faster than any of the other dynamic data. We try to fit
 	 * the fdarray into comfortable page-tuned chunks: starting at 1024B
-	 * and growing in powers of two from there on.  Since we called only
-	 * with slots_wanted > BITS_PER_LONG (embedded instance in files->fdtab
-	 * already gives BITS_PER_LONG slots), the above boils down to
-	 * 1.  use the smallest power of two large enough to give us that many
-	 * slots.
-	 * 2.  on 32bit skip 64 and 128 - the minimal capacity we want there is
-	 * 256 slots (i.e. 1Kb fd array).
-	 * 3.  on 64bit don't skip anything, 1Kb fd array means 128 slots there
-	 * and we are never going to be asked for 64 or less.
+	 * and growing in powers of two from there on.
 	 */
-	if (IS_ENABLED(CONFIG_32BIT) && slots_wanted < 256)
-		nr = 256;
-	else
-		nr = roundup_pow_of_two(slots_wanted);
+	nr /= (1024 / sizeof(struct file *));
+	nr = roundup_pow_of_two(nr + 1);
+	nr *= (1024 / sizeof(struct file *));
 	/*
 	 * Note that this can drive nr *below* what we had passed if sysctl_nr_open
-	 * had been set lower between the check in expand_files() and here.
+	 * had been set lower between the check in expand_files() and here.  Deal
+	 * with that in caller, it's cheaper that way.
 	 *
 	 * We make sure that nr remains a multiple of BITS_PER_LONG - otherwise
 	 * bitmaps handling below becomes unpleasant, to put it mildly...
 	 */
-	if (unlikely(nr > sysctl_nr_open)) {
-		nr = round_down(sysctl_nr_open, BITS_PER_LONG);
-		if (nr < slots_wanted)
-			return ERR_PTR(-EMFILE);
-	}
-
-	/*
-	 * Check if the allocation size would exceed INT_MAX. kvmalloc_array()
-	 * and kvmalloc() will warn if the allocation size is greater than
-	 * INT_MAX, as filp_cachep objects are not __GFP_NOWARN.
-	 *
-	 * This can happen when sysctl_nr_open is set to a very high value and
-	 * a process tries to use a file descriptor near that limit. For example,
-	 * if sysctl_nr_open is set to 1073741816 (0x3ffffff8) - which is what
-	 * systemd typically sets it to - then trying to use a file descriptor
-	 * close to that value will require allocating a file descriptor table
-	 * that exceeds 8GB in size.
-	 */
-	if (unlikely(nr > INT_MAX / sizeof(struct file *)))
-		return ERR_PTR(-EMFILE);
+	if (unlikely(nr > sysctl_nr_open))
+		nr = ((sysctl_nr_open - 1) | (BITS_PER_LONG - 1)) + 1;
 
 	fdt = kmalloc(sizeof(struct fdtable), GFP_KERNEL);
 	if (!fdt)
@@ -186,7 +161,7 @@ out_arr:
 out_fdt:
 	kfree(fdt);
 out:
-	return ERR_PTR(-ENOMEM);
+	return NULL;
 }
 
 /*
@@ -203,7 +178,7 @@ static int expand_fdtable(struct files_struct *files, int nr)
 	struct fdtable *new_fdt, *cur_fdt;
 
 	spin_unlock(&files->file_lock);
-	new_fdt = alloc_fdtable(nr + 1);
+	new_fdt = alloc_fdtable(nr);
 
 	/* make sure all __fd_install() have seen resize_in_progress
 	 * or have finished their rcu_read_lock_sched() section.
@@ -212,8 +187,19 @@ static int expand_fdtable(struct files_struct *files, int nr)
 		synchronize_sched();
 
 	spin_lock(&files->file_lock);
-	if (IS_ERR(new_fdt))
-		return PTR_ERR(new_fdt);
+	if (!new_fdt)
+		return -ENOMEM;
+	/*
+	 * extremely unlikely race - sysctl_nr_open decreased between the check in
+	 * caller and alloc_fdtable().  Cheaper to catch it here...
+	 */
+	if (unlikely(new_fdt->max_fds <= nr)) {
+#ifdef CONFIG_SEC_DEBUG_FILE_LEAK
+		sec_debug_EMFILE_error_proc((unsigned long)files);
+#endif
+		__free_fdtable(new_fdt);
+		return -EMFILE;
+	}
 	cur_fdt = files_fdtable(files);
 	BUG_ON(nr < cur_fdt->max_fds);
 	copy_fdtable(new_fdt, cur_fdt);
@@ -248,8 +234,12 @@ repeat:
 		return expanded;
 
 	/* Can we expand? */
-	if (nr >= sysctl_nr_open)
+	if (nr >= sysctl_nr_open) {
+#ifdef CONFIG_SEC_DEBUG_FILE_LEAK
+		sec_debug_EMFILE_error_proc((unsigned long)files);
+#endif
 		return -EMFILE;
+	}
 
 	if (unlikely(files->resize_in_progress)) {
 		spin_unlock(&files->file_lock);
@@ -350,9 +340,19 @@ struct files_struct *dup_fd(struct files_struct *oldf, int *errorp)
 		if (new_fdt != &newf->fdtab)
 			__free_fdtable(new_fdt);
 
-		new_fdt = alloc_fdtable(open_files);
-		if (IS_ERR(new_fdt)) {
-			*errorp = PTR_ERR(new_fdt);
+		new_fdt = alloc_fdtable(open_files - 1);
+		if (!new_fdt) {
+			*errorp = -ENOMEM;
+			goto out_release;
+		}
+
+		/* beyond sysctl_nr_open; nothing to do */
+		if (unlikely(new_fdt->max_fds < open_files)) {
+#ifdef CONFIG_SEC_DEBUG_FILE_LEAK
+			sec_debug_EMFILE_error_proc((unsigned long)oldf);
+#endif
+			__free_fdtable(new_fdt);
+			*errorp = -EMFILE;
 			goto out_release;
 		}
 
@@ -493,17 +493,17 @@ struct files_struct init_files = {
 		.full_fds_bits	= init_files.full_fds_bits_init,
 	},
 	.file_lock	= __SPIN_LOCK_UNLOCKED(init_files.file_lock),
-	.resize_wait	= __WAIT_QUEUE_HEAD_INITIALIZER(init_files.resize_wait),
+	.resize_wait    = __WAIT_QUEUE_HEAD_INITIALIZER(init_files.resize_wait),
 };
 
 static unsigned long find_next_fd(struct fdtable *fdt, unsigned long start)
 {
-	unsigned long maxfd = fdt->max_fds; /* always multiple of BITS_PER_LONG */
+	unsigned long maxfd = fdt->max_fds;
 	unsigned long maxbit = maxfd / BITS_PER_LONG;
 	unsigned long bitbit = start / BITS_PER_LONG;
 
 	bitbit = find_next_zero_bit(fdt->full_fds_bits, maxbit, bitbit) * BITS_PER_LONG;
-	if (bitbit >= maxfd)
+	if (bitbit > maxfd)
 		return maxfd;
 	if (bitbit > start)
 		start = bitbit;
@@ -535,8 +535,12 @@ repeat:
 	 * will limit the total number of files that can be opened.
 	 */
 	error = -EMFILE;
-	if (fd >= end)
+	if (fd >= end) {
+#ifdef CONFIG_SEC_DEBUG_FILE_LEAK
+		sec_debug_EMFILE_error_proc((unsigned long)files);
+#endif
 		goto out;
+	}
 
 	error = expand_files(files, fd);
 	if (error < 0)
@@ -638,6 +642,10 @@ void __fd_install(struct files_struct *files, unsigned int fd,
 	fdt = rcu_dereference_sched(files->fdt);
 	BUG_ON(fdt->fd[fd] != NULL);
 	rcu_assign_pointer(fdt->fd[fd], file);
+
+#if defined(CONFIG_SEC_FD_DETECT)
+	save_open_close_fdinfo(fd, true, current, files);
+#endif // END CONFIG_SEC_FD_DETECT
 	rcu_read_unlock_sched();
 }
 
@@ -660,10 +668,15 @@ int __close_fd(struct files_struct *files, unsigned fd)
 	fdt = files_fdtable(files);
 	if (fd >= fdt->max_fds)
 		goto out_unlock;
-	fd = array_index_nospec(fd, fdt->max_fds);
 	file = fdt->fd[fd];
 	if (!file)
 		goto out_unlock;
+
+#if defined(CONFIG_SEC_FD_DETECT)
+	check_fd_invalid_close(fd, current, files, file);
+	save_open_close_fdinfo(fd, false, current, files);
+#endif // END CONFIG_SEC_FD_DETECT
+
 	rcu_assign_pointer(fdt->fd[fd], NULL);
 	__clear_close_on_exec(fd, fdt);
 	__put_unused_fd(files, fd);
@@ -711,88 +724,38 @@ void do_close_on_exec(struct files_struct *files)
 	spin_unlock(&files->file_lock);
 }
 
-static inline struct file *__fget_files_rcu(struct files_struct *files,
-		unsigned int fd, fmode_t mask, unsigned int refs)
-{
-	for (;;) {
-		struct file *file;
-		struct fdtable *fdt = rcu_dereference_raw(files->fdt);
-		struct file __rcu **fdentry;
-
-		if (unlikely(fd >= fdt->max_fds))
-			return NULL;
-
-		fdentry = fdt->fd + array_index_nospec(fd, fdt->max_fds);
-		file = rcu_dereference_raw(*fdentry);
-		if (unlikely(!file))
-			return NULL;
-
-		if (unlikely(file->f_mode & mask))
-			return NULL;
-
-		/*
-		 * Ok, we have a file pointer. However, because we do
-		 * this all locklessly under RCU, we may be racing with
-		 * that file being closed.
-		 *
-		 * Such a race can take two forms:
-		 *
-		 *  (a) the file ref already went down to zero,
-		 *      and get_file_rcu_many() fails. Just try
-		 *      again:
-		 */
-		if (unlikely(!get_file_rcu_many(file, refs)))
-			continue;
-
-		/*
-		 *  (b) the file table entry has changed under us.
-		 *       Note that we don't need to re-check the 'fdt->fd'
-		 *       pointer having changed, because it always goes
-		 *       hand-in-hand with 'fdt'.
-		 *
-		 * If so, we need to put our refs and try again.
-		 */
-		if (unlikely(rcu_dereference_raw(files->fdt) != fdt) ||
-		    unlikely(rcu_dereference_raw(*fdentry) != file)) {
-			fput_many(file, refs);
-			continue;
-		}
-
-		/*
-		 * Ok, we have a ref to the file, and checked that it
-		 * still exists.
-		 */
-		return file;
-	}
-}
-
-
-static struct file *__fget(unsigned int fd, fmode_t mask, unsigned int refs)
+static struct file *__fget(unsigned int fd, fmode_t mask)
 {
 	struct files_struct *files = current->files;
 	struct file *file;
 
 	rcu_read_lock();
-	file = __fget_files_rcu(files, fd, mask, refs);
+loop:
+	file = fcheck_files(files, fd);
+	if (file) {
+		/* File object ref couldn't be taken.
+		 * dup2() atomicity guarantee is the reason
+		 * we loop to catch the new file (or NULL pointer)
+		 */
+		if (file->f_mode & mask)
+			file = NULL;
+		else if (!get_file_rcu(file))
+			goto loop;
+	}
 	rcu_read_unlock();
 
 	return file;
 }
 
-struct file *fget_many(unsigned int fd, unsigned int refs)
-{
-	return __fget(fd, FMODE_PATH, refs);
-}
-
 struct file *fget(unsigned int fd)
 {
-	return __fget(fd, FMODE_PATH, 1);
+	return __fget(fd, FMODE_PATH);
 }
 EXPORT_SYMBOL(fget);
 
 struct file *fget_raw(unsigned int fd)
 {
-	return __fget(fd, 0, 1);
+	return __fget(fd, 0);
 }
 EXPORT_SYMBOL(fget_raw);
 
@@ -823,7 +786,7 @@ static unsigned long __fget_light(unsigned int fd, fmode_t mask)
 			return 0;
 		return (unsigned long)file;
 	} else {
-		file = __fget(fd, mask, 1);
+		file = __fget(fd, mask);
 		if (!file)
 			return 0;
 		return FDPUT_FPUT | (unsigned long)file;
@@ -907,7 +870,6 @@ __releases(&files->file_lock)
 	 * tables and this condition does not arise without those.
 	 */
 	fdt = files_fdtable(files);
-	fd = array_index_nospec(fd, fdt->max_fds);
 	tofree = fdt->fd[fd];
 	if (!tofree && fd_is_open(fd, fdt))
 		goto Ebusy;
@@ -964,8 +926,12 @@ SYSCALL_DEFINE3(dup3, unsigned int, oldfd, unsigned int, newfd, int, flags)
 	if (unlikely(oldfd == newfd))
 		return -EINVAL;
 
-	if (newfd >= rlimit(RLIMIT_NOFILE))
+	if (newfd >= rlimit(RLIMIT_NOFILE)) {
+#ifdef CONFIG_SEC_DEBUG_FILE_LEAK
+		sec_debug_EMFILE_error_proc((unsigned long)files);
+#endif
 		return -EBADF;
+	}
 
 	spin_lock(&files->file_lock);
 	err = expand_files(files, newfd);

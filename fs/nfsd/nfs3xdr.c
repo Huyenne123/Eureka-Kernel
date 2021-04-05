@@ -120,7 +120,7 @@ decode_sattr3(__be32 *p, struct iattr *iap)
 
 		iap->ia_valid |= ATTR_SIZE;
 		p = xdr_decode_hyper(p, &newsize);
-		iap->ia_size = newsize;
+		iap->ia_size = min_t(u64, newsize, NFS_OFFSET_MAX);
 	}
 	if ((tmp = ntohl(*p++)) == 1) {	/* set to server time */
 		iap->ia_valid |= ATTR_ATIME;
@@ -821,13 +821,8 @@ compose_entry_fh(struct nfsd3_readdirres *cd, struct svc_fh *fhp,
 	if (isdotent(name, namlen)) {
 		if (namlen == 2) {
 			dchild = dget_parent(dparent);
-			/*
-			 * Don't return filehandle for ".." if we're at
-			 * the filesystem or export root:
-			 */
+			/* filesystem root - cannot return filehandle for ".." */
 			if (dchild == dparent)
-				goto out;
-			if (dparent == exp->ex_path.dentry)
 				goto out;
 		} else
 			dchild = dget(dparent);

@@ -337,24 +337,20 @@ hfcusb_l2l1D(struct mISDNchannel *ch, struct sk_buff *skb)
 		test_and_clear_bit(FLG_L2_ACTIVATED, &dch->Flags);
 
 		if (hw->protocol == ISDN_P_NT_S0) {
-			struct sk_buff_head free_queue;
-
-			__skb_queue_head_init(&free_queue);
 			hfcsusb_ph_command(hw, HFC_L1_DEACTIVATE_NT);
 			spin_lock_irqsave(&hw->lock, flags);
-			skb_queue_splice_init(&dch->squeue, &free_queue);
+			skb_queue_purge(&dch->squeue);
 			if (dch->tx_skb) {
-				__skb_queue_tail(&free_queue, dch->tx_skb);
+				dev_kfree_skb(dch->tx_skb);
 				dch->tx_skb = NULL;
 			}
 			dch->tx_idx = 0;
 			if (dch->rx_skb) {
-				__skb_queue_tail(&free_queue, dch->rx_skb);
+				dev_kfree_skb(dch->rx_skb);
 				dch->rx_skb = NULL;
 			}
 			test_and_clear_bit(FLG_TX_BUSY, &dch->Flags);
 			spin_unlock_irqrestore(&hw->lock, flags);
-			__skb_queue_purge(&free_queue);
 #ifdef FIXME
 			if (test_and_clear_bit(FLG_L1_BUSY, &dch->Flags))
 				dchannel_sched_event(&hc->dch, D_CLEARBUSY);
@@ -1344,7 +1340,7 @@ tx_iso_complete(struct urb *urb)
 					printk("\n");
 				}
 
-				dev_consume_skb_irq(tx_skb);
+				dev_kfree_skb(tx_skb);
 				tx_skb = NULL;
 				if (fifo->dch && get_next_dframe(fifo->dch))
 					tx_skb = fifo->dch->tx_skb;
@@ -1406,7 +1402,6 @@ start_isoc_chain(struct usb_fifo *fifo, int num_packets_per_urb,
 				printk(KERN_DEBUG
 				       "%s: %s: alloc urb for fifo %i failed",
 				       hw->name, __func__, fifo->fifonum);
-				continue;
 			}
 			fifo->iso[i].owner_fifo = (struct usb_fifo *) fifo;
 			fifo->iso[i].indx = i;
@@ -1705,23 +1700,13 @@ hfcsusb_stop_endpoint(struct hfcsusb *hw, int channel)
 static int
 setup_hfcsusb(struct hfcsusb *hw)
 {
-	void *dmabuf = kmalloc(sizeof(u_char), GFP_KERNEL);
 	u_char b;
-	int ret;
 
 	if (debug & DBG_HFC_CALL_TRACE)
 		printk(KERN_DEBUG "%s: %s\n", hw->name, __func__);
 
-	if (!dmabuf)
-		return -ENOMEM;
-
-	ret = read_reg_atomic(hw, HFCUSB_CHIP_ID, dmabuf);
-
-	memcpy(&b, dmabuf, sizeof(u_char));
-	kfree(dmabuf);
-
 	/* check the chip id */
-	if (ret != 1) {
+	if (read_reg_atomic(hw, HFCUSB_CHIP_ID, &b) != 1) {
 		printk(KERN_DEBUG "%s: %s: cannot read chip id\n",
 		       hw->name, __func__);
 		return 1;
@@ -1913,13 +1898,13 @@ out:
 	mISDN_freebchannel(&hw->bch[1]);
 	mISDN_freebchannel(&hw->bch[0]);
 	mISDN_freedchannel(&hw->dch);
+	kfree(hw);
 	return err;
 }
 
 static int
 hfcsusb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 {
-	int err;
 	struct hfcsusb			*hw;
 	struct usb_device		*dev = interface_to_usbdev(intf);
 	struct usb_host_interface	*iface = intf->cur_altsetting;
@@ -1978,9 +1963,6 @@ hfcsusb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 
 				/* get endpoint base */
 				idx = ((ep_addr & 0x7f) - 1) * 2;
-				if (idx > 15)
-					return -EIO;
-
 				if (ep_addr & 0x80)
 					idx++;
 				attr = ep->desc.bmAttributes;
@@ -2110,28 +2092,20 @@ hfcsusb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	if (!hw->ctrl_urb) {
 		pr_warn("%s: No memory for control urb\n",
 			driver_info->vend_name);
-		err = -ENOMEM;
-		goto err_free_hw;
+		kfree(hw);
+		return -ENOMEM;
 	}
 
 	pr_info("%s: %s: detected \"%s\" (%s, if=%d alt=%d)\n",
 		hw->name, __func__, driver_info->vend_name,
 		conf_str[small_match], ifnum, alt_used);
 
-	if (setup_instance(hw, dev->dev.parent)) {
-		err = -EIO;
-		goto err_free_urb;
-	}
+	if (setup_instance(hw, dev->dev.parent))
+		return -EIO;
 
 	hw->intf = intf;
 	usb_set_intfdata(hw->intf, hw);
 	return 0;
-
-err_free_urb:
-	usb_free_urb(hw->ctrl_urb);
-err_free_hw:
-	kfree(hw);
-	return err;
 }
 
 /* function called when an active device is removed */

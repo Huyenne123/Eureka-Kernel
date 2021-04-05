@@ -1864,8 +1864,7 @@ void evergreen_hpd_init(struct radeon_device *rdev)
 			break;
 		}
 		radeon_hpd_set_polarity(rdev, radeon_connector->hpd.hpd);
-		if (radeon_connector->hpd.hpd != RADEON_HPD_NONE)
-			enabled |= 1 << radeon_connector->hpd.hpd;
+		enabled |= 1 << radeon_connector->hpd.hpd;
 	}
 	radeon_irq_kms_enable_hpd(rdev, enabled);
 }
@@ -1908,8 +1907,7 @@ void evergreen_hpd_fini(struct radeon_device *rdev)
 		default:
 			break;
 		}
-		if (radeon_connector->hpd.hpd != RADEON_HPD_NONE)
-			disabled |= 1 << radeon_connector->hpd.hpd;
+		disabled |= 1 << radeon_connector->hpd.hpd;
 	}
 	radeon_irq_kms_disable_hpd(rdev, disabled);
 }

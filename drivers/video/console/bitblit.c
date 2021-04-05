@@ -80,16 +80,12 @@ static inline void bit_putcs_aligned(struct vc_data *vc, struct fb_info *info,
 				     struct fb_image *image, u8 *buf, u8 *dst)
 {
 	u16 charmask = vc->vc_hi_font_mask ? 0x1ff : 0xff;
-	unsigned int charcnt = vc->vc_font.charcount;
 	u32 idx = vc->vc_font.width >> 3;
 	u8 *src;
 
 	while (cnt--) {
-		u16 ch = scr_readw(s++) & charmask;
-
-		if (ch >= charcnt)
-			ch = 0;
-		src = vc->vc_font.data + (unsigned int)ch * cellsize;
+		src = vc->vc_font.data + (scr_readw(s++)&
+					  charmask)*cellsize;
 
 		if (attr) {
 			update_attr(buf, src, attr, vc);
@@ -117,18 +113,14 @@ static inline void bit_putcs_unaligned(struct vc_data *vc,
 				       u8 *dst)
 {
 	u16 charmask = vc->vc_hi_font_mask ? 0x1ff : 0xff;
-	unsigned int charcnt = vc->vc_font.charcount;
 	u32 shift_low = 0, mod = vc->vc_font.width % 8;
 	u32 shift_high = 8;
 	u32 idx = vc->vc_font.width >> 3;
 	u8 *src;
 
 	while (cnt--) {
-		u16 ch = scr_readw(s++) & charmask;
-
-		if (ch >= charcnt)
-			ch = 0;
-		src = vc->vc_font.data + (unsigned int)ch * cellsize;
+		src = vc->vc_font.data + (scr_readw(s++)&
+					  charmask)*cellsize;
 
 		if (attr) {
 			update_attr(buf, src, attr, vc);
@@ -169,11 +161,6 @@ static void bit_putcs(struct vc_data *vc, struct fb_info *info,
 	image.height = vc->vc_font.height;
 	image.depth = 1;
 
-	if (image.dy >= info->var.yres)
-		return;
-
-	image.height = min(image.height, info->var.yres - image.dy);
-
 	if (attribute) {
 		buf = kmalloc(cellsize, GFP_ATOMIC);
 		if (!buf)
@@ -187,18 +174,6 @@ static void bit_putcs(struct vc_data *vc, struct fb_info *info,
 			cnt = count;
 
 		image.width = vc->vc_font.width * cnt;
-
-		if (image.dx >= info->var.xres)
-			break;
-
-		if (image.dx + image.width > info->var.xres) {
-			image.width = info->var.xres - image.dx;
-			cnt = image.width / vc->vc_font.width;
-			if (cnt == 0)
-				break;
-			image.width = cnt * vc->vc_font.width;
-		}
-
 		pitch = DIV_ROUND_UP(image.width, 8) + scan_align;
 		pitch &= ~scan_align;
 		size = pitch * image.height + buf_align;
@@ -241,7 +216,7 @@ static void bit_clear_margins(struct vc_data *vc, struct fb_info *info,
 	region.color = 0;
 	region.rop = ROP_COPY;
 
-	if ((int) rw > 0 && !bottom_only) {
+	if (rw && !bottom_only) {
 		region.dx = info->var.xoffset + rs;
 		region.dy = 0;
 		region.width = rw;
@@ -249,7 +224,7 @@ static void bit_clear_margins(struct vc_data *vc, struct fb_info *info,
 		info->fbops->fb_fillrect(info, &region);
 	}
 
-	if ((int) bh > 0) {
+	if (bh) {
 		region.dx = info->var.xoffset;
 		region.dy = info->var.yoffset + bs;
 		region.width = rs;
@@ -259,7 +234,7 @@ static void bit_clear_margins(struct vc_data *vc, struct fb_info *info,
 }
 
 static void bit_cursor(struct vc_data *vc, struct fb_info *info, int mode,
-		       int fg, int bg)
+		       int softback_lines, int fg, int bg)
 {
 	struct fb_cursor cursor;
 	struct fbcon_ops *ops = info->fbcon_par;
@@ -272,8 +247,14 @@ static void bit_cursor(struct vc_data *vc, struct fb_info *info, int mode,
 
 	cursor.set = 0;
 
-	if (!vc->vc_font.data)
-		return;
+	if (softback_lines) {
+		if (y + softback_lines >= vc->vc_rows) {
+			mode = CM_ERASE;
+			ops->cursor_flash = 0;
+			return;
+		} else
+			y += softback_lines;
+	}
 
  	c = scr_readw((u16 *) vc->vc_pos);
 	attribute = get_attribute(info, c);

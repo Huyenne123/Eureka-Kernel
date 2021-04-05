@@ -1234,7 +1234,7 @@ static struct dma_async_tx_descriptor *edma_prep_dma_memcpy(
 static struct dma_async_tx_descriptor *edma_prep_dma_cyclic(
 	struct dma_chan *chan, dma_addr_t buf_addr, size_t buf_len,
 	size_t period_len, enum dma_transfer_direction direction,
-	unsigned long tx_flags)
+	unsigned long tx_flags, void *context)
 {
 	struct edma_chan *echan = to_edma_chan(chan);
 	struct device *dev = chan->device->dev;
@@ -1914,8 +1914,8 @@ static int edma_setup_from_hw(struct device *dev, struct edma_soc_info *pdata,
 	 * priority. So Q0 is the highest priority queue and the last queue has
 	 * the lowest priority.
 	 */
-	queue_priority_map = devm_kcalloc(dev, ecc->num_tc + 1,
-					  sizeof(*queue_priority_map), GFP_KERNEL);
+	queue_priority_map = devm_kcalloc(dev, ecc->num_tc + 1, sizeof(s8),
+					  GFP_KERNEL);
 	if (!queue_priority_map)
 		return -ENOMEM;
 
@@ -2218,6 +2218,9 @@ static int edma_probe(struct platform_device *pdev)
 
 	ecc->default_queue = info->default_queue;
 
+	for (i = 0; i < ecc->num_slots; i++)
+		edma_write_slot(ecc, i, &dummy_paramset);
+
 	if (info->rsv) {
 		/* Set the reserved slots in inuse list */
 		rsv_slots = info->rsv->rsv_slots;
@@ -2228,12 +2231,6 @@ static int edma_probe(struct platform_device *pdev)
 				set_bits(off, ln, ecc->slot_inuse);
 			}
 		}
-	}
-
-	for (i = 0; i < ecc->num_slots; i++) {
-		/* Reset only unused - not reserved - paRAM slots */
-		if (!test_bit(i, ecc->slot_inuse))
-			edma_write_slot(ecc, i, &dummy_paramset);
 	}
 
 	/* Clear the xbar mapped channels in unused list */
@@ -2248,7 +2245,7 @@ static int edma_probe(struct platform_device *pdev)
 	if (irq < 0 && node)
 		irq = irq_of_parse_and_map(node, 0);
 
-	if (irq > 0) {
+	if (irq >= 0) {
 		irq_name = devm_kasprintf(dev, GFP_KERNEL, "%s_ccint",
 					  dev_name(dev));
 		ret = devm_request_irq(dev, irq, dma_irq_handler, 0, irq_name,
@@ -2263,7 +2260,7 @@ static int edma_probe(struct platform_device *pdev)
 	if (irq < 0 && node)
 		irq = irq_of_parse_and_map(node, 2);
 
-	if (irq > 0) {
+	if (irq >= 0) {
 		irq_name = devm_kasprintf(dev, GFP_KERNEL, "%s_ccerrint",
 					  dev_name(dev));
 		ret = devm_request_irq(dev, irq, dma_ccerr_handler, 0, irq_name,
@@ -2288,10 +2285,8 @@ static int edma_probe(struct platform_device *pdev)
 
 		ecc->tc_list = devm_kcalloc(dev, ecc->num_tc,
 					    sizeof(*ecc->tc_list), GFP_KERNEL);
-		if (!ecc->tc_list) {
-			ret = -ENOMEM;
-			goto err_reg1;
-		}
+		if (!ecc->tc_list)
+			return -ENOMEM;
 
 		for (i = 0;; i++) {
 			ret = of_parse_phandle_with_fixed_args(node, "ti,tptcs",
@@ -2439,13 +2434,7 @@ static struct platform_driver edma_driver = {
 	},
 };
 
-static int edma_tptc_probe(struct platform_device *pdev)
-{
-	return 0;
-}
-
 static struct platform_driver edma_tptc_driver = {
-	.probe		= edma_tptc_probe,
 	.driver = {
 		.name	= "edma3-tptc",
 		.of_match_table = edma_tptc_of_ids,

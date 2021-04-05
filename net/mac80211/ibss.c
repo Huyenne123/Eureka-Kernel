@@ -427,7 +427,7 @@ static void ieee80211_sta_join_ibss(struct ieee80211_sub_if_data *sdata,
 	case NL80211_CHAN_WIDTH_5:
 	case NL80211_CHAN_WIDTH_10:
 		cfg80211_chandef_create(&chandef, cbss->channel,
-					NL80211_CHAN_WIDTH_20_NOHT);
+					NL80211_CHAN_NO_HT);
 		chandef.width = sdata->u.ibss.chandef.width;
 		break;
 	case NL80211_CHAN_WIDTH_80:
@@ -438,7 +438,7 @@ static void ieee80211_sta_join_ibss(struct ieee80211_sub_if_data *sdata,
 	default:
 		/* fall back to 20 MHz for unsupported modes */
 		cfg80211_chandef_create(&chandef, cbss->channel,
-					NL80211_CHAN_WIDTH_20_NOHT);
+					NL80211_CHAN_NO_HT);
 		break;
 	}
 
@@ -542,10 +542,6 @@ int ieee80211_ibss_finish_csa(struct ieee80211_sub_if_data *sdata)
 	int err, changed = 0;
 
 	sdata_assert_lock(sdata);
-
-	/* When not connected/joined, sending CSA doesn't make sense. */
-	if (ifibss->state != IEEE80211_IBSS_MLME_JOINED)
-		return -ENOLINK;
 
 	/* update cfg80211 bss information with the new channel */
 	if (!is_zero_ether_addr(ifibss->bssid)) {
@@ -1864,8 +1860,6 @@ int ieee80211_ibss_leave(struct ieee80211_sub_if_data *sdata)
 
 	/* remove beacon */
 	kfree(sdata->u.ibss.ie);
-	sdata->u.ibss.ie = NULL;
-	sdata->u.ibss.ie_len = 0;
 
 	/* on the next join, re-program HT parameters */
 	memset(&ifibss->ht_capa, 0, sizeof(ifibss->ht_capa));

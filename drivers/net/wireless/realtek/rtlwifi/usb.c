@@ -755,11 +755,8 @@ static int _rtl_usb_receive(struct ieee80211_hw *hw)
 
 		usb_anchor_urb(urb, &rtlusb->rx_submitted);
 		err = usb_submit_urb(urb, GFP_KERNEL);
-		if (err) {
-			usb_unanchor_urb(urb);
-			usb_free_urb(urb);
+		if (err)
 			goto err_out;
-		}
 		usb_free_urb(urb);
 	}
 	return 0;
@@ -1097,10 +1094,8 @@ int rtl_usb_probe(struct usb_interface *intf,
 	rtlpriv->hw = hw;
 	rtlpriv->usb_data = kzalloc(RTL_USB_MAX_RX_COUNT * sizeof(u32),
 				    GFP_KERNEL);
-	if (!rtlpriv->usb_data) {
-		ieee80211_free_hw(hw);
+	if (!rtlpriv->usb_data)
 		return -ENOMEM;
-	}
 
 	/* this spin lock must be initialized early */
 	spin_lock_init(&rtlpriv->locks.usb_lock);
@@ -1159,11 +1154,10 @@ int rtl_usb_probe(struct usb_interface *intf,
 	return 0;
 
 error_out:
-	rtl_usb_deinit(hw);
 	rtl_deinit_core(hw);
 	_rtl_usb_io_handler_release(hw);
 	usb_put_dev(udev);
-	kfree(rtlpriv->usb_data);
+	complete(&rtlpriv->firmware_loading_complete);
 	return -ENODEV;
 }
 EXPORT_SYMBOL(rtl_usb_probe);

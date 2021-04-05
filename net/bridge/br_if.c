@@ -154,9 +154,8 @@ void br_manage_promisc(struct net_bridge *br)
 			 * This lets us disable promiscuous mode and write
 			 * this config to hw.
 			 */
-			if ((p->dev->priv_flags & IFF_UNICAST_FLT) &&
-			    (br->auto_cnt == 0 ||
-			     (br->auto_cnt == 1 && br_auto_port(p))))
+			if (br->auto_cnt == 0 ||
+			    (br->auto_cnt == 1 && br_auto_port(p)))
 				br_port_clear_promisc(p);
 			else
 				br_port_set_promisc(p);
@@ -472,15 +471,13 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	call_netdevice_notifiers(NETDEV_JOIN, dev);
 
 	err = dev_set_allmulti(dev, 1);
-	if (err) {
-		kfree(p);	/* kobject not yet init'd, manually free */
-		goto err1;
-	}
+	if (err)
+		goto put_back;
 
 	err = kobject_init_and_add(&p->kobj, &brport_ktype, &(dev->dev.kobj),
 				   SYSFS_BRIDGE_PORT_ATTR);
 	if (err)
-		goto err2;
+		goto err1;
 
 	err = br_sysfs_addif(p);
 	if (err)
@@ -554,9 +551,12 @@ err3:
 	sysfs_remove_link(br->ifobj, p->dev->name);
 err2:
 	kobject_put(&p->kobj);
-	dev_set_allmulti(dev, -1);
+	p = NULL; /* kobject_put frees */
 err1:
+	dev_set_allmulti(dev, -1);
+put_back:
 	dev_put(dev);
+	kfree(p);
 	return err;
 }
 

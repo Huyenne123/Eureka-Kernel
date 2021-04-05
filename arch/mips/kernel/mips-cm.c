@@ -9,7 +9,6 @@
  */
 
 #include <linux/errno.h>
-#include <linux/of.h>
 #include <linux/percpu.h>
 #include <linux/spinlock.h>
 
@@ -19,14 +18,13 @@
 void __iomem *mips_cm_base;
 void __iomem *mips_cm_l2sync_base;
 int mips_cm_is64;
-bool mips_cm_is_l2_hci_broken;
 
 static char *cm2_tr[8] = {
 	"mem",	"gcr",	"gic",	"mmio",
 	"0x04", "cpc", "0x06", "0x07"
 };
 
-/* CM3 Tag ECC transation type */
+/* CM3 Tag ECC transaction type */
 static char *cm3_tr[16] = {
 	[0x0] = "ReqNoData",
 	[0x1] = "0x1",
@@ -125,9 +123,9 @@ static char *cm2_causes[32] = {
 	"COH_RD_ERR", "MMIO_WR_ERR", "MMIO_RD_ERR", "0x07",
 	"0x08", "0x09", "0x0a", "0x0b",
 	"0x0c", "0x0d", "0x0e", "0x0f",
-	"0x10", "INTVN_WR_ERR", "INTVN_RD_ERR", "0x13",
-	"0x14", "0x15", "0x16", "0x17",
-	"0x18", "0x19", "0x1a", "0x1b",
+	"0x10", "0x11", "0x12", "0x13",
+	"0x14", "0x15", "0x16", "INTVN_WR_ERR",
+	"INTVN_RD_ERR", "0x19", "0x1a", "0x1b",
 	"0x1c", "0x1d", "0x1e", "0x1f"
 };
 
@@ -203,18 +201,6 @@ static void mips_cm_probe_l2sync(void)
 	mips_cm_l2sync_base = ioremap_nocache(addr, MIPS_CM_L2SYNC_SIZE);
 }
 
-void mips_cm_update_property(void)
-{
-	struct device_node *cm_node;
-
-	cm_node = of_find_compatible_node(of_root, NULL, "mobileye,eyeq6-cm");
-	if (!cm_node)
-		return;
-	pr_info("HCI (Hardware Cache Init for the L2 cache) in GCR_L2_RAM_CONFIG from the CM3 is broken");
-	mips_cm_is_l2_hci_broken = true;
-	of_node_put(cm_node);
-}
-
 int mips_cm_probe(void)
 {
 	phys_addr_t addr;
@@ -279,15 +265,34 @@ void mips_cm_lock_other(unsigned int core, unsigned int vp)
 	u32 val;
 
 	preempt_disable();
-	curr_core = current_cpu_data.core;
-	spin_lock_irqsave(&per_cpu(cm_core_lock, curr_core),
-			  per_cpu(cm_core_lock_flags, curr_core));
 
 	if (mips_cm_revision() >= CM_REV_CM3) {
 		val = core << CM3_GCR_Cx_OTHER_CORE_SHF;
 		val |= vp << CM3_GCR_Cx_OTHER_VP_SHF;
+
+		/*
+		 * We need to disable interrupts in SMP systems in order to
+		 * ensure that we don't interrupt the caller with code which
+		 * may modify the redirect register. We do so here in a
+		 * slightly obscure way by using a spin lock, since this has
+		 * the neat property of also catching any nested uses of
+		 * mips_cm_lock_other() leading to a deadlock or a nice warning
+		 * with lockdep enabled.
+		 */
+		spin_lock_irqsave(this_cpu_ptr(&cm_core_lock),
+				  *this_cpu_ptr(&cm_core_lock_flags));
 	} else {
-		BUG_ON(vp != 0);
+		WARN_ON(vp != 0);
+
+		/*
+		 * We only have a GCR_CL_OTHER per core in systems with
+		 * CM 2.5 & older, so have to ensure other VP(E)s don't
+		 * race with us.
+		 */
+		curr_core = current_cpu_data.core;
+		spin_lock_irqsave(&per_cpu(cm_core_lock, curr_core),
+				  per_cpu(cm_core_lock_flags, curr_core));
+
 		val = core << CM_GCR_Cx_OTHER_CORENUM_SHF;
 	}
 
@@ -302,10 +307,17 @@ void mips_cm_lock_other(unsigned int core, unsigned int vp)
 
 void mips_cm_unlock_other(void)
 {
-	unsigned curr_core = current_cpu_data.core;
+	unsigned int curr_core;
 
-	spin_unlock_irqrestore(&per_cpu(cm_core_lock, curr_core),
-			       per_cpu(cm_core_lock_flags, curr_core));
+	if (mips_cm_revision() < CM_REV_CM3) {
+		curr_core = current_cpu_data.core;
+		spin_unlock_irqrestore(&per_cpu(cm_core_lock, curr_core),
+				       per_cpu(cm_core_lock_flags, curr_core));
+	} else {
+		spin_unlock_irqrestore(this_cpu_ptr(&cm_core_lock),
+				       *this_cpu_ptr(&cm_core_lock_flags));
+	}
+
 	preempt_enable();
 }
 

@@ -18,6 +18,7 @@
 #include <linux/atomic.h>
 #include <asm/ptrace.h>
 #include <asm/irq.h>
+#include <asm/sections.h>
 
 /*
  * These correspond to the IORESOURCE_IRQ_* defines in
@@ -62,6 +63,7 @@
  *                wakeup devices users need to implement wakeup detection in
  *                their interrupt handlers.
  */
+#define IRQF_DISABLED		0x00000020
 #define IRQF_SHARED		0x00000080
 #define IRQF_PROBE_SHARED	0x00000100
 #define __IRQF_TIMER		0x00000200
@@ -74,6 +76,7 @@
 #define IRQF_NO_THREAD		0x00010000
 #define IRQF_EARLY_RESUME	0x00020000
 #define IRQF_COND_SUSPEND	0x00040000
+#define IRQF_GIC_MULTI_TARGET	0x10000000
 
 #define IRQF_TIMER		(__IRQF_TIMER | IRQF_NO_SUSPEND | IRQF_NO_THREAD)
 
@@ -313,7 +316,7 @@ irq_set_affinity_notifier(unsigned int irq, struct irq_affinity_notify *notify)
 static inline void disable_irq_nosync_lockdep(unsigned int irq)
 {
 	disable_irq_nosync(irq);
-#if defined(CONFIG_LOCKDEP) && !defined(CONFIG_PREEMPT_RT)
+#ifdef CONFIG_LOCKDEP
 	local_irq_disable();
 #endif
 }
@@ -321,7 +324,7 @@ static inline void disable_irq_nosync_lockdep(unsigned int irq)
 static inline void disable_irq_nosync_lockdep_irqsave(unsigned int irq, unsigned long *flags)
 {
 	disable_irq_nosync(irq);
-#if defined(CONFIG_LOCKDEP) && !defined(CONFIG_PREEMPT_RT)
+#ifdef CONFIG_LOCKDEP
 	local_irq_save(*flags);
 #endif
 }
@@ -336,7 +339,7 @@ static inline void disable_irq_lockdep(unsigned int irq)
 
 static inline void enable_irq_lockdep(unsigned int irq)
 {
-#if defined(CONFIG_LOCKDEP) && !defined(CONFIG_PREEMPT_RT)
+#ifdef CONFIG_LOCKDEP
 	local_irq_enable();
 #endif
 	enable_irq(irq);
@@ -344,7 +347,7 @@ static inline void enable_irq_lockdep(unsigned int irq)
 
 static inline void enable_irq_lockdep_irqrestore(unsigned int irq, unsigned long *flags)
 {
-#if defined(CONFIG_LOCKDEP) && !defined(CONFIG_PREEMPT_RT)
+#ifdef CONFIG_LOCKDEP
 	local_irq_restore(*flags);
 #endif
 	enable_irq(irq);
@@ -671,5 +674,12 @@ int arch_show_interrupts(struct seq_file *p, int prec);
 extern int early_irq_init(void);
 extern int arch_probe_nr_irqs(void);
 extern int arch_early_irq_init(void);
+
+/*
+ * We want to know which function is an entrypoint of a hardirq or a softirq.
+ */
+#define __irq_entry		 __attribute__((__section__(".irqentry.text")))
+#define __softirq_entry  \
+	__attribute__((__section__(".softirqentry.text")))
 
 #endif

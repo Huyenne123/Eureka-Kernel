@@ -263,10 +263,8 @@ nouveau_connector_detect(struct drm_connector *connector, bool force)
 		pm_runtime_get_noresume(dev->dev);
 	} else {
 		ret = pm_runtime_get_sync(dev->dev);
-		if (ret < 0 && ret != -EACCES) {
-			pm_runtime_put_autosuspend(dev->dev);
+		if (ret < 0 && ret != -EACCES)
 			return conn_status;
-		}
 	}
 
 	nv_encoder = nouveau_connector_ddc_detect(connector);
@@ -441,6 +439,7 @@ nouveau_connector_force(struct drm_connector *connector)
 	if (!nv_encoder) {
 		NV_ERROR(drm, "can't find encoder to force %s on!\n",
 			 connector->name);
+		connector->status = connector_status_disconnected;
 		return;
 	}
 
@@ -797,9 +796,6 @@ nouveau_connector_get_modes(struct drm_connector *connector)
 		struct drm_display_mode *mode;
 
 		mode = drm_mode_duplicate(dev, nv_connector->native_mode);
-		if (!mode)
-			return 0;
-
 		drm_mode_probed_add(connector, mode);
 		ret = 1;
 	}
@@ -808,7 +804,7 @@ nouveau_connector_get_modes(struct drm_connector *connector)
 	 * "native" mode as some VBIOS tables require us to use the
 	 * pixel clock as part of the lookup...
 	 */
-	if (connector->connector_type == DRM_MODE_CONNECTOR_LVDS && nv_connector->native_mode)
+	if (connector->connector_type == DRM_MODE_CONNECTOR_LVDS)
 		nouveau_connector_detect_depth(connector);
 
 	if (nv_encoder->dcb->type == DCB_OUTPUT_TV)

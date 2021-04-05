@@ -10,7 +10,6 @@
 #include <linux/efi.h>
 #include <linux/fs.h>
 #include <linux/ctype.h>
-#include <linux/kmemleak.h>
 #include <linux/slab.h>
 
 #include "internal.h"
@@ -45,7 +44,7 @@ struct inode *efivarfs_get_inode(struct super_block *sb,
  *
  *	VariableName-12345678-1234-1234-1234-1234567891bc
  */
-static bool efivarfs_valid_name(const char *str, int len)
+bool efivarfs_valid_name(const char *str, int len)
 {
 	static const char dashes[EFI_VARIABLE_GUID_LEN] = {
 		[8] = 1, [13] = 1, [18] = 1, [23] = 1
@@ -139,7 +138,6 @@ static int efivarfs_create(struct inode *dir, struct dentry *dentry,
 	var->var.VariableName[i] = '\0';
 
 	inode->i_private = var;
-	kmemleak_ignore(var);
 
 	efivar_entry_add(var, &efivarfs_list);
 	d_instantiate(dentry, inode);

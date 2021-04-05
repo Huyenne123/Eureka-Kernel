@@ -168,7 +168,6 @@ static struct drm_conn_prop_enum_list drm_connector_enum_list[] = {
 	{ DRM_MODE_CONNECTOR_eDP, "eDP" },
 	{ DRM_MODE_CONNECTOR_VIRTUAL, "Virtual" },
 	{ DRM_MODE_CONNECTOR_DSI, "DSI" },
-	{ DRM_MODE_CONNECTOR_DPI, "DPI" },
 };
 
 static const struct drm_prop_enum_list drm_encoder_enum_list[] = {
@@ -180,7 +179,6 @@ static const struct drm_prop_enum_list drm_encoder_enum_list[] = {
 	{ DRM_MODE_ENCODER_VIRTUAL, "Virtual" },
 	{ DRM_MODE_ENCODER_DSI, "DSI" },
 	{ DRM_MODE_ENCODER_DPMST, "DP MST" },
-	{ DRM_MODE_ENCODER_DPI, "DPI" },
 };
 
 static const struct drm_prop_enum_list drm_subpixel_enum_list[] = {

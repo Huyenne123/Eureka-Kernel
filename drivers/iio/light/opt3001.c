@@ -138,10 +138,6 @@ static const struct opt3001_scale opt3001_scales[] = {
 		.val2 = 400000,
 	},
 	{
-		.val = 41932,
-		.val2 = 800000,
-	},
-	{
 		.val = 83865,
 		.val2 = 600000,
 	},
@@ -650,10 +646,8 @@ static irqreturn_t opt3001_irq(int irq, void *_iio)
 	struct iio_dev *iio = _iio;
 	struct opt3001 *opt = iio_priv(iio);
 	int ret;
-	bool wake_result_ready_queue = false;
-	bool ok_to_ignore_lock = opt->ok_to_ignore_lock;
 
-	if (!ok_to_ignore_lock)
+	if (!opt->ok_to_ignore_lock)
 		mutex_lock(&opt->lock);
 
 	ret = i2c_smbus_read_word_swapped(opt->client, OPT3001_CONFIGURATION);
@@ -686,15 +680,12 @@ static irqreturn_t opt3001_irq(int irq, void *_iio)
 		}
 		opt->result = ret;
 		opt->result_ready = true;
-		wake_result_ready_queue = true;
+		wake_up(&opt->result_ready_queue);
 	}
 
 out:
-	if (!ok_to_ignore_lock)
+	if (!opt->ok_to_ignore_lock)
 		mutex_unlock(&opt->lock);
-
-	if (wake_result_ready_queue)
-		wake_up(&opt->result_ready_queue);
 
 	return IRQ_HANDLED;
 }

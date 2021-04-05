@@ -56,6 +56,7 @@ static void batadv_dat_purge(struct work_struct *work);
  */
 static void batadv_dat_start_timer(struct batadv_priv *bat_priv)
 {
+	INIT_DELAYED_WORK(&bat_priv->dat.work, batadv_dat_purge);
 	queue_delayed_work(batadv_event_workqueue, &bat_priv->dat.work,
 			   msecs_to_jiffies(10000));
 }
@@ -225,7 +226,6 @@ static u32 batadv_hash_dat(const void *data, u32 size)
 	u32 hash = 0;
 	const struct batadv_dat_entry *dat = data;
 	const unsigned char *key;
-	__be16 vid;
 	u32 i;
 
 	key = (const unsigned char *)&dat->ip;
@@ -235,8 +235,7 @@ static u32 batadv_hash_dat(const void *data, u32 size)
 		hash ^= (hash >> 6);
 	}
 
-	vid = htons(dat->vid);
-	key = (__force const unsigned char *)&vid;
+	key = (const unsigned char *)&dat->vid;
 	for (i = 0; i < sizeof(dat->vid); i++) {
 		hash += key[i];
 		hash += (hash << 10);
@@ -756,7 +755,6 @@ int batadv_dat_init(struct batadv_priv *bat_priv)
 	if (!bat_priv->dat.hash)
 		return -ENOMEM;
 
-	INIT_DELAYED_WORK(&bat_priv->dat.work, batadv_dat_purge);
 	batadv_dat_start_timer(bat_priv);
 
 	batadv_tvlv_handler_register(bat_priv, batadv_dat_tvlv_ogm_handler_v1,
@@ -993,19 +991,15 @@ bool batadv_dat_snoop_outgoing_arp_request(struct batadv_priv *bat_priv,
 		if (!skb_new)
 			goto out;
 
-		if (vid & BATADV_VLAN_HAS_TAG) {
+		if (vid & BATADV_VLAN_HAS_TAG)
 			skb_new = vlan_insert_tag(skb_new, htons(ETH_P_8021Q),
 						  vid & VLAN_VID_MASK);
-			if (!skb_new)
-				goto out;
-		}
 
 		skb_reset_mac_header(skb_new);
 		skb_new->protocol = eth_type_trans(skb_new,
 						   bat_priv->soft_iface);
-		batadv_inc_counter(bat_priv, BATADV_CNT_RX);
-		batadv_add_counter(bat_priv, BATADV_CNT_RX_BYTES,
-				   skb->len + ETH_HLEN + hdr_size);
+		bat_priv->stats.rx_packets++;
+		bat_priv->stats.rx_bytes += skb->len + ETH_HLEN + hdr_size;
 		bat_priv->soft_iface->last_rx = jiffies;
 
 		netif_rx(skb_new);
@@ -1077,12 +1071,9 @@ bool batadv_dat_snoop_incoming_arp_request(struct batadv_priv *bat_priv,
 	 */
 	skb_reset_mac_header(skb_new);
 
-	if (vid & BATADV_VLAN_HAS_TAG) {
+	if (vid & BATADV_VLAN_HAS_TAG)
 		skb_new = vlan_insert_tag(skb_new, htons(ETH_P_8021Q),
 					  vid & VLAN_VID_MASK);
-		if (!skb_new)
-			goto out;
-	}
 
 	/* To preserve backwards compatibility, the node has choose the outgoing
 	 * format based on the incoming request packet type. The assumption is

@@ -48,6 +48,7 @@
 #include <linux/nodemask.h>
 #include <linux/moduleparam.h>
 #include <linux/uaccess.h>
+#include <linux/exynos-ss.h>
 
 #include "workqueue_internal.h"
 
@@ -687,17 +688,12 @@ static void clear_work_data(struct work_struct *work)
 	set_work_data(work, WORK_STRUCT_NO_POOL, 0);
 }
 
-static inline struct pool_workqueue *work_struct_pwq(unsigned long data)
-{
-	return (struct pool_workqueue *)(data & WORK_STRUCT_WQ_DATA_MASK);
-}
-
 static struct pool_workqueue *get_work_pwq(struct work_struct *work)
 {
 	unsigned long data = atomic_long_read(&work->data);
 
 	if (data & WORK_STRUCT_PWQ)
-		return work_struct_pwq(data);
+		return (void *)(data & WORK_STRUCT_WQ_DATA_MASK);
 	else
 		return NULL;
 }
@@ -725,7 +721,8 @@ static struct worker_pool *get_work_pool(struct work_struct *work)
 	assert_rcu_or_pool_mutex();
 
 	if (data & WORK_STRUCT_PWQ)
-		return work_struct_pwq(data)->pool;
+		return ((struct pool_workqueue *)
+			(data & WORK_STRUCT_WQ_DATA_MASK))->pool;
 
 	pool_id = data >> WORK_OFFQ_POOL_SHIFT;
 	if (pool_id == WORK_OFFQ_POOL_NONE)
@@ -746,7 +743,8 @@ static int get_work_pool_id(struct work_struct *work)
 	unsigned long data = atomic_long_read(&work->data);
 
 	if (data & WORK_STRUCT_PWQ)
-		return work_struct_pwq(data)->pool->id;
+		return ((struct pool_workqueue *)
+			(data & WORK_STRUCT_WQ_DATA_MASK))->pool->id;
 
 	return data >> WORK_OFFQ_POOL_SHIFT;
 }
@@ -1354,6 +1352,7 @@ static void __queue_work(int cpu, struct workqueue_struct *wq,
 	 */
 	WARN_ON_ONCE(!irqs_disabled());
 
+	debug_work_activate(work);
 
 	/* if draining, only works from the same workqueue are allowed */
 	if (unlikely(wq->flags & __WQ_DRAINING) &&
@@ -1432,7 +1431,6 @@ retry:
 		worklist = &pwq->delayed_works;
 	}
 
-	debug_work_activate(work);
 	insert_work(pwq, work, worklist, work_flags);
 
 	spin_unlock(&pwq->pool->lock);
@@ -2064,7 +2062,9 @@ __acquires(&pool->lock)
 	lock_map_acquire_read(&pwq->wq->lockdep_map);
 	lock_map_acquire(&lockdep_map);
 	trace_workqueue_execute_start(work);
+	exynos_ss_work(worker, worker->task, worker->current_func, ESS_FLAG_IN);
 	worker->current_func(work);
+	exynos_ss_work(worker, worker->task, worker->current_func, ESS_FLAG_OUT);
 	/*
 	 * While we must be careful to not use "work" after this, the trace
 	 * point will only record its address.
@@ -2311,14 +2311,8 @@ repeat:
 			 */
 			if (need_to_create_worker(pool)) {
 				spin_lock(&wq_mayday_lock);
-				/*
-				 * Queue iff we aren't racing destruction
-				 * and somebody else hasn't queued it already.
-				 */
-				if (wq->rescuer && list_empty(&pwq->mayday_node)) {
-					get_pwq(pwq);
-					list_add_tail(&pwq->mayday_node, &wq->maydays);
-				}
+				get_pwq(pwq);
+				list_move_tail(&pwq->mayday_node, &wq->maydays);
 				spin_unlock(&wq_mayday_lock);
 			}
 		}
@@ -3312,21 +3306,15 @@ static void pwq_unbound_release_workfn(struct work_struct *work)
 						  unbound_release_work);
 	struct workqueue_struct *wq = pwq->wq;
 	struct worker_pool *pool = pwq->pool;
-	bool is_last = false;
+	bool is_last;
 
-	/*
-	 * when @pwq is not linked, it doesn't hold any reference to the
-	 * @wq, and @wq is invalid to access.
-	 */
-	if (!list_empty(&pwq->pwqs_node)) {
-		if (WARN_ON_ONCE(!(wq->flags & WQ_UNBOUND)))
-			return;
+	if (WARN_ON_ONCE(!(wq->flags & WQ_UNBOUND)))
+		return;
 
-		mutex_lock(&wq->mutex);
-		list_del_rcu(&pwq->pwqs_node);
-		is_last = list_empty(&wq->pwqs);
-		mutex_unlock(&wq->mutex);
-	}
+	mutex_lock(&wq->mutex);
+	list_del_rcu(&pwq->pwqs_node);
+	is_last = list_empty(&wq->pwqs);
+	mutex_unlock(&wq->mutex);
 
 	mutex_lock(&wq_pool_mutex);
 	put_unbound_pool(pool);
@@ -3370,24 +3358,17 @@ static void pwq_adjust_max_active(struct pool_workqueue *pwq)
 	 * is updated and visible.
 	 */
 	if (!freezable || !workqueue_freezing) {
-		bool kick = false;
-
 		pwq->max_active = wq->saved_max_active;
 
 		while (!list_empty(&pwq->delayed_works) &&
-		       pwq->nr_active < pwq->max_active) {
+		       pwq->nr_active < pwq->max_active)
 			pwq_activate_first_delayed(pwq);
-			kick = true;
-		}
 
 		/*
 		 * Need to kick a worker after thawed or an unbound wq's
-		 * max_active is bumped. In realtime scenarios, always kicking a
-		 * worker will cause interference on the isolated cpu cores, so
-		 * let's kick iff work items were activated.
+		 * max_active is bumped.  It's a slow path.  Do it always.
 		 */
-		if (kick)
-			wake_up_worker(pwq->pool);
+		wake_up_worker(pwq->pool);
 	} else {
 		pwq->max_active = 0;
 	}
@@ -3971,28 +3952,8 @@ void destroy_workqueue(struct workqueue_struct *wq)
 	struct pool_workqueue *pwq;
 	int node;
 
-	/*
-	 * Remove it from sysfs first so that sanity check failure doesn't
-	 * lead to sysfs name conflicts.
-	 */
-	workqueue_sysfs_unregister(wq);
-
 	/* drain it before proceeding with destruction */
 	drain_workqueue(wq);
-
-	/* kill rescuer, if sanity checks fail, leave it w/o rescuer */
-	if (wq->rescuer) {
-		struct worker *rescuer = wq->rescuer;
-
-		/* this prevents new queueing */
-		spin_lock_irq(&wq_mayday_lock);
-		wq->rescuer = NULL;
-		spin_unlock_irq(&wq_mayday_lock);
-
-		/* rescuer will empty maydays list before exiting */
-		kthread_stop(rescuer->task);
-		kfree(rescuer);
-	}
 
 	/* sanity checks */
 	mutex_lock(&wq->mutex);
@@ -4022,6 +3983,11 @@ void destroy_workqueue(struct workqueue_struct *wq)
 	mutex_lock(&wq_pool_mutex);
 	list_del_rcu(&wq->list);
 	mutex_unlock(&wq_pool_mutex);
+
+	workqueue_sysfs_unregister(wq);
+
+	if (wq->rescuer)
+		kthread_stop(wq->rescuer->task);
 
 	if (!(wq->flags & WQ_UNBOUND)) {
 		/*
@@ -4299,8 +4265,7 @@ static void show_pwq(struct pool_workqueue *pwq)
 	pr_info("  pwq %d:", pool->id);
 	pr_cont_pool_info(pool);
 
-	pr_cont(" active=%d/%d refcnt=%d%s\n",
-		pwq->nr_active, pwq->max_active, pwq->refcnt,
+	pr_cont(" active=%d/%d%s\n", pwq->nr_active, pwq->max_active,
 		!list_empty(&pwq->mayday_node) ? " MAYDAY" : "");
 
 	hash_for_each(pool->busy_hash, bkt, worker, hentry) {
@@ -4847,13 +4812,9 @@ static int workqueue_apply_unbound_cpumask(void)
 	list_for_each_entry(wq, &workqueues, list) {
 		if (!(wq->flags & WQ_UNBOUND))
 			continue;
-
 		/* creating multiple pwqs breaks ordering guarantee */
-		if (!list_empty(&wq->pwqs)) {
-			if (wq->flags & __WQ_ORDERED_EXPLICIT)
-				continue;
-			wq->flags &= ~__WQ_ORDERED;
-		}
+		if (wq->flags & __WQ_ORDERED)
+			continue;
 
 		ctx = apply_wqattrs_prepare(wq, wq->unbound_attrs);
 		if (!ctx) {

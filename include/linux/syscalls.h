@@ -205,6 +205,26 @@ extern struct trace_event_functions exit_syscall_print_funcs;
 	}								\
 	static inline long SYSC##name(__MAP(x,__SC_DECL,__VA_ARGS__))
 
+/*
+ * Called before coming back to user-mode. Returning to user-mode with an
+ * address limit different than USER_DS can allow to overwrite kernel memory.
+ */
+static inline void addr_limit_user_check(void)
+{
+#ifdef TIF_FSCHECK
+	if (!test_thread_flag(TIF_FSCHECK))
+		return;
+#endif
+
+	if (CHECK_DATA_CORRUPTION(!segment_eq(get_fs(), USER_DS),
+				  "Invalid address limit on user-mode return"))
+		force_sig(SIGKILL, current);
+
+#ifdef TIF_FSCHECK
+	clear_thread_flag(TIF_FSCHECK);
+#endif
+}
+
 asmlinkage long sys32_quotactl(unsigned int cmd, const char __user *special,
 			       qid_t id, void __user *addr);
 asmlinkage long sys_time(time_t __user *tloc);
@@ -390,7 +410,7 @@ asmlinkage long sys_mount(char __user *dev_name, char __user *dir_name,
 asmlinkage long sys_umount(char __user *name, int flags);
 asmlinkage long sys_oldumount(char __user *name);
 asmlinkage long sys_truncate(const char __user *path, long length);
-asmlinkage long sys_ftruncate(unsigned int fd, off_t length);
+asmlinkage long sys_ftruncate(unsigned int fd, unsigned long length);
 asmlinkage long sys_stat(const char __user *filename,
 			struct __old_kernel_stat __user *statbuf);
 asmlinkage long sys_statfs(const char __user * path,

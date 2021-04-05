@@ -581,11 +581,8 @@ static int ccp_init_dm_workarea(struct ccp_dm_workarea *wa,
 
 		wa->dma.address = dma_map_single(wa->dev, wa->address, len,
 						 dir);
-		if (!wa->dma.address) {
-			kfree(wa->address);
-			wa->address = NULL;
+		if (!wa->dma.address)
 			return -ENOMEM;
-		}
 
 		wa->dma.length = len;
 	}

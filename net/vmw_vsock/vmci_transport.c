@@ -142,8 +142,6 @@ vmci_transport_packet_init(struct vmci_transport_packet *pkt,
 			   u16 proto,
 			   struct vmci_handle handle)
 {
-	memset(pkt, 0, sizeof(*pkt));
-
 	/* We register the stream control handler as an any cid handle so we
 	 * must always send from a source address of VMADDR_CID_ANY
 	 */
@@ -156,6 +154,8 @@ vmci_transport_packet_init(struct vmci_transport_packet *pkt,
 	pkt->type = type;
 	pkt->src_port = src->svm_port;
 	pkt->dst_port = dst->svm_port;
+	memset(&pkt->proto, 0, sizeof(pkt->proto));
+	memset(&pkt->_reserved2, 0, sizeof(pkt->_reserved2));
 
 	switch (pkt->type) {
 	case VMCI_TRANSPORT_PACKET_TYPE_INVALID:
@@ -593,7 +593,8 @@ vmci_transport_queue_pair_alloc(struct vmci_qp **qpair,
 			       peer, flags, VMCI_NO_PRIVILEGE_FLAGS);
 out:
 	if (err < 0) {
-		pr_err_once("Could not attach to queue pair with %d\n", err);
+		pr_err("Could not attach to queue pair with %d\n",
+		       err);
 		err = vmci_transport_error_to_vsock_error(err);
 	}
 
@@ -1679,6 +1680,8 @@ static void vmci_transport_destruct(struct vsock_sock *vsk)
 
 static void vmci_transport_release(struct vsock_sock *vsk)
 {
+	vsock_remove_sock(vsk);
+
 	if (!vmci_handle_is_invalid(vmci_trans(vsk)->dg_handle)) {
 		vmci_datagram_destroy_handle(vmci_trans(vsk)->dg_handle);
 		vmci_trans(vsk)->dg_handle = VMCI_INVALID_HANDLE;
@@ -1736,11 +1739,7 @@ static int vmci_transport_dgram_enqueue(
 	if (!dg)
 		return -ENOMEM;
 
-	err = memcpy_from_msg(VMCI_DG_PAYLOAD(dg), msg, len);
-	if (err) {
-		kfree(dg);
-		return err;
-	}
+	memcpy_from_msg(VMCI_DG_PAYLOAD(dg), msg, len);
 
 	dg->dst = vmci_make_handle(remote_addr->svm_cid,
 				   remote_addr->svm_port);
@@ -1774,11 +1773,8 @@ static int vmci_transport_dgram_dequeue(struct vsock_sock *vsk,
 	/* Retrieve the head sk_buff from the socket's receive queue. */
 	err = 0;
 	skb = skb_recv_datagram(&vsk->sk, flags, noblock, &err);
-	if (err)
-		return err;
-
 	if (!skb)
-		return -EAGAIN;
+		return err;
 
 	dg = (struct vmci_datagram *)skb->data;
 	if (!dg)
@@ -2093,7 +2089,7 @@ static u32 vmci_transport_get_local_cid(void)
 	return vmci_get_context_id();
 }
 
-static struct vsock_transport vmci_transport = {
+static const struct vsock_transport vmci_transport = {
 	.init = vmci_transport_socket_init,
 	.destruct = vmci_transport_destruct,
 	.release = vmci_transport_release,
@@ -2193,7 +2189,7 @@ module_exit(vmci_transport_exit);
 
 MODULE_AUTHOR("VMware, Inc.");
 MODULE_DESCRIPTION("VMCI transport for Virtual Sockets");
-MODULE_VERSION("1.0.3.0-k");
+MODULE_VERSION("1.0.4.0-k");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("vmware_vsock");
 MODULE_ALIAS_NETPROTO(PF_VSOCK);

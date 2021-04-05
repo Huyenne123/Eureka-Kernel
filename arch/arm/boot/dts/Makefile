@@ -166,7 +166,6 @@ dtb-$(CONFIG_MACH_KIRKWOOD) += \
 	kirkwood-ds109.dtb \
 	kirkwood-ds110jv10.dtb \
 	kirkwood-ds111.dtb \
-	kirkwood-ds112.dtb \
 	kirkwood-ds209.dtb \
 	kirkwood-ds210.dtb \
 	kirkwood-ds212.dtb \
@@ -463,7 +462,6 @@ dtb-$(CONFIG_SOC_AM33XX) += \
 	am335x-sl50.dtb \
 	am335x-evm.dtb \
 	am335x-evmsk.dtb \
-	am335x-moxa-uc-8100-me-t.dtb \
 	am335x-nano.dtb \
 	am335x-pepper.dtb \
 	am335x-lxm.dtb \
@@ -546,15 +544,6 @@ dtb-$(CONFIG_ARCH_SHMOBILE_MULTI) += \
 	r7s72100-genmai.dtb \
 	r8a73a4-ape6evm.dtb \
 	r8a7740-armadillo800eva.dtb \
-	r8a7742-iwg21d-q7.dtb \
-	r8a7742-iwg21d-q7-dbcm-ca.dtb \
-	r8a7743-iwg20d-q7.dtb \
-	r8a7743-iwg20d-q7-dbcm-ca.dtb \
-	r8a7744-iwg20d-q7.dtb \
-	r8a7744-iwg20d-q7-dbcm-ca.dtb \
-	r8a7745-iwg22d-sodimm.dtb \
-	r8a7745-iwg22d-sodimm-dbhd-ca.dtb \
-	r8a77470-iwg23s-sbc.dtb \
 	r8a7778-bockw.dtb \
 	r8a7779-marzen.dtb \
 	r8a7790-lager.dtb \
@@ -569,7 +558,7 @@ dtb-$(CONFIG_ARCH_SOCFPGA) += \
 	socfpga_arria5_socdk.dtb \
 	socfpga_arria10_socdk_sdmmc.dtb \
 	socfpga_cyclone5_socdk.dtb \
-	socfpga_cyclone5_de0_nano_soc.dtb \
+	socfpga_cyclone5_de0_sockit.dtb \
 	socfpga_cyclone5_sockit.dtb \
 	socfpga_cyclone5_socrates.dtb \
 	socfpga_vt.dtb
@@ -793,5 +782,15 @@ endif
 dtstree		:= $(srctree)/$(src)
 dtb-$(CONFIG_OF_ALL_DTBS) := $(patsubst $(dtstree)/%.dts,%.dtb, $(wildcard $(dtstree)/*.dts))
 
-always		:= $(dtb-y)
+DTB_NAMES := $(subst $\",,$(CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAMES))
+ifneq ($(DTB_NAMES),)
+DTB_LIST := $(addsuffix .dtb,$(DTB_NAMES))
+else
+DTB_LIST := $(dtb-y)
+endif
+
+targets += dtbs dtbs_install
+targets += $(DTB_LIST)
+
+always		:= $(DTB_LIST)
 clean-files	:= *.dtb

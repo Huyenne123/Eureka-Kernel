@@ -91,11 +91,11 @@ static struct usb_interface_descriptor hidg_interface_desc = {
 static struct hid_descriptor hidg_desc = {
 	.bLength			= sizeof hidg_desc,
 	.bDescriptorType		= HID_DT_HID,
-	.bcdHID				= cpu_to_le16(0x0101),
+	.bcdHID				= 0x0101,
 	.bCountryCode			= 0x00,
 	.bNumDescriptors		= 0x1,
-	/*.rpt_desc.bDescriptorType	= DYNAMIC */
-	/*.rpt_desc.wDescriptorLength	= DYNAMIC */
+	/*.desc[0].bDescriptorType	= DYNAMIC */
+	/*.desc[0].wDescriptorLenght	= DYNAMIC */
 };
 
 /* High-Speed Support */
@@ -245,14 +245,15 @@ static ssize_t f_hidg_read(struct file *file, char __user *buffer,
 	 * call, taking into account its current read position.
 	 */
 	if (list->pos == req->actual) {
-		kfree(list);
+ 		kfree(list);
 
 		req->length = hidg->report_length;
 		ret = usb_ep_queue(hidg->out_ep, req, GFP_KERNEL);
 		if (ret < 0) {
 			free_ep_req(hidg->out_ep, req);
-			return ret;
+ 			return ret;
 		}
+	
 	} else {
 		spin_lock_irqsave(&hidg->spinlock, flags);
 		list_add(&list->list, &hidg->completed_out_req);
@@ -453,8 +454,8 @@ static int hidg_setup(struct usb_function *f,
 			struct hid_descriptor hidg_desc_copy = hidg_desc;
 
 			VDBG(cdev, "USB_REQ_GET_DESCRIPTOR: HID\n");
-			hidg_desc_copy.rpt_desc.bDescriptorType = HID_DT_REPORT;
-			hidg_desc_copy.rpt_desc.wDescriptorLength =
+			hidg_desc_copy.desc[0].bDescriptorType = HID_DT_REPORT;
+			hidg_desc_copy.desc[0].wDescriptorLength =
 				cpu_to_le16(hidg->report_desc_length);
 
 			length = min_t(unsigned short, length,
@@ -507,13 +508,13 @@ static void hidg_disable(struct usb_function *f)
 	usb_ep_disable(hidg->in_ep);
 	usb_ep_disable(hidg->out_ep);
 
-	spin_lock_irqsave(&hidg->spinlock, flags);
+	spin_lock_irqsave(&hidg->read_spinlock, flags);
 	list_for_each_entry_safe(list, next, &hidg->completed_out_req, list) {
 		free_ep_req(hidg->out_ep, list->req);
 		list_del(&list->list);
 		kfree(list);
 	}
-	spin_unlock_irqrestore(&hidg->spinlock, flags);
+	spin_unlock_irqrestore(&hidg->read_spinlock, flags);
 }
 
 static int hidg_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
@@ -652,8 +653,8 @@ static int hidg_bind(struct usb_configuration *c, struct usb_function *f)
 	 * We can use hidg_desc struct here but we should not relay
 	 * that its content won't change after returning from this function.
 	 */
-	hidg_desc.rpt_desc.bDescriptorType = HID_DT_REPORT;
-	hidg_desc.rpt_desc.wDescriptorLength =
+	hidg_desc.desc[0].bDescriptorType = HID_DT_REPORT;
+	hidg_desc.desc[0].wDescriptorLength =
 		cpu_to_le16(hidg->report_desc_length);
 
 	hidg_hs_in_ep_desc.bEndpointAddress =

@@ -224,7 +224,7 @@ static void flush_smp_call_function_queue(bool warn_cpu_offline)
 
 	/* There shouldn't be any pending callbacks on an offline CPU. */
 	if (unlikely(warn_cpu_offline && !cpu_online(smp_processor_id()) &&
-		     !warned && entry != NULL)) {
+		     !warned && !llist_empty(head))) {
 		warned = true;
 		WARN(1, "IPI on offline CPU %d\n", smp_processor_id());
 
@@ -495,10 +495,29 @@ int smp_call_function(smp_call_func_t func, void *info, int wait)
 }
 EXPORT_SYMBOL(smp_call_function);
 
+/* control working core by early param */
+unsigned long sec_cpumask;
+static int __init sec_core_masking(char *s)
+{
+	long mask;
+	int ret;
+
+	ret = kstrtol(s, 16, &mask);
+	if (ret)
+		return -1;
+
+	sec_cpumask = (unsigned long)mask;
+
+	return 0;
+}
+early_param("sec_coremask", sec_core_masking);
+
 /* Setup configured maximum number of CPUs to activate */
 unsigned int setup_max_cpus = NR_CPUS;
 EXPORT_SYMBOL(setup_max_cpus);
 
+struct cpumask early_cpu_mask;
+EXPORT_SYMBOL(early_cpu_mask);
 
 /*
  * Setup routine for controlling SMP activation
@@ -570,12 +589,25 @@ void __init smp_init(void)
 
 	idle_threads_init();
 
+	cpumask_clear(&early_cpu_mask);
+	for_each_cpu(cpu, topology_idle_cpumask(0))
+		clear_bit(cpu, &sec_cpumask);
+
+	cpumask_set_cpu(0, &early_cpu_mask);
 	/* FIXME: This should be done in userspace --RR */
 	for_each_present_cpu(cpu) {
 		if (num_online_cpus() >= setup_max_cpus)
 			break;
-		if (!cpu_online(cpu))
+
+		if (test_bit(cpu, &sec_cpumask)) {
+			pr_err("%s: CPU%d OFF by sec coremask\n", __func__, cpu);
+			continue;
+		}
+
+		if (!cpu_online(cpu)) {
+			cpumask_set_cpu(cpu, &early_cpu_mask);
 			cpu_up(cpu);
+		}
 	}
 
 	/* Any cleanup work */

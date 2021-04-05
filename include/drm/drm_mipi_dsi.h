@@ -143,7 +143,6 @@ enum mipi_dsi_pixel_format {
  * struct mipi_dsi_device - DSI peripheral device
  * @host: DSI host for this peripheral
  * @dev: driver model device node for this peripheral
- * @attached: the DSI device has been successfully attached
  * @channel: virtual channel assigned to the peripheral
  * @format: pixel format for video mode
  * @lanes: number of active data lanes
@@ -152,7 +151,6 @@ enum mipi_dsi_pixel_format {
 struct mipi_dsi_device {
 	struct mipi_dsi_host *host;
 	struct device dev;
-	bool attached;
 
 	unsigned int channel;
 	unsigned int lanes;

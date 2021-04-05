@@ -70,7 +70,7 @@ struct virtio_config_ops {
 	int (*find_vqs)(struct virtio_device *, unsigned nvqs,
 			struct virtqueue *vqs[],
 			vq_callback_t *callbacks[],
-			const char *names[]);
+			const char * const names[]);
 	void (*del_vqs)(struct virtio_device *);
 	u64 (*get_features)(struct virtio_device *vdev);
 	int (*finalize_features)(struct virtio_device *vdev);
@@ -149,6 +149,19 @@ static inline bool virtio_has_feature(const struct virtio_device *vdev,
 	return __virtio_test_bit(vdev, fbit);
 }
 
+/**
+ * virtio_has_iommu_quirk - determine whether this device has the iommu quirk
+ * @vdev: the device
+ */
+static inline bool virtio_has_iommu_quirk(const struct virtio_device *vdev)
+{
+	/*
+	 * Note the reverse polarity of the quirk feature (compared to most
+	 * other features), this is for compatibility with legacy systems.
+	 */
+	return !virtio_has_feature(vdev, VIRTIO_F_IOMMU_PLATFORM);
+}
+
 static inline
 struct virtqueue *virtio_find_single_vq(struct virtio_device *vdev,
 					vq_callback_t *c, const char *n)
@@ -192,7 +205,7 @@ const char *virtio_bus_name(struct virtio_device *vdev)
  * @vq: the virtqueue
  * @cpu: the cpu no.
  *
- * Note that this function is best-effort: the affinity hint may not be set
+ * Pay attention the function are best-effort: the affinity hint may not be set
  * due to config support, irq type and sharing.
  *
  */

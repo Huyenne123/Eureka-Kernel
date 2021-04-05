@@ -183,7 +183,7 @@ static int lm3630a_bank_a_update_status(struct backlight_device *bl)
 	if ((pwm_ctrl & LM3630A_PWM_BANK_A) != 0) {
 		lm3630a_pwm_ctrl(pchip, bl->props.brightness,
 				 bl->props.max_brightness);
-		return 0;
+		return bl->props.brightness;
 	}
 
 	/* disable sleep */
@@ -200,11 +200,11 @@ static int lm3630a_bank_a_update_status(struct backlight_device *bl)
 				      LM3630A_LEDA_ENABLE, LM3630A_LEDA_ENABLE);
 	if (ret < 0)
 		goto out_i2c_err;
-	return 0;
+	return bl->props.brightness;
 
 out_i2c_err:
-	dev_err(pchip->dev, "i2c failed to access (%pe)\n", ERR_PTR(ret));
-	return ret;
+	dev_err(pchip->dev, "i2c failed to access\n");
+	return bl->props.brightness;
 }
 
 static int lm3630a_bank_a_get_brightness(struct backlight_device *bl)
@@ -222,7 +222,7 @@ static int lm3630a_bank_a_get_brightness(struct backlight_device *bl)
 		if (rval < 0)
 			goto out_i2c_err;
 		brightness |= rval;
-		return brightness;
+		goto out;
 	}
 
 	/* disable sleep */
@@ -233,8 +233,11 @@ static int lm3630a_bank_a_get_brightness(struct backlight_device *bl)
 	rval = lm3630a_read(pchip, REG_BRT_A);
 	if (rval < 0)
 		goto out_i2c_err;
-	return rval;
+	brightness = rval;
 
+out:
+	bl->props.brightness = brightness;
+	return bl->props.brightness;
 out_i2c_err:
 	dev_err(pchip->dev, "i2c failed to access register\n");
 	return 0;
@@ -257,7 +260,7 @@ static int lm3630a_bank_b_update_status(struct backlight_device *bl)
 	if ((pwm_ctrl & LM3630A_PWM_BANK_B) != 0) {
 		lm3630a_pwm_ctrl(pchip, bl->props.brightness,
 				 bl->props.max_brightness);
-		return 0;
+		return bl->props.brightness;
 	}
 
 	/* disable sleep */
@@ -274,11 +277,11 @@ static int lm3630a_bank_b_update_status(struct backlight_device *bl)
 				      LM3630A_LEDB_ENABLE, LM3630A_LEDB_ENABLE);
 	if (ret < 0)
 		goto out_i2c_err;
-	return 0;
+	return bl->props.brightness;
 
 out_i2c_err:
-	dev_err(pchip->dev, "i2c failed to access (%pe)\n", ERR_PTR(ret));
-	return ret;
+	dev_err(pchip->dev, "i2c failed to access REG_CTRL\n");
+	return bl->props.brightness;
 }
 
 static int lm3630a_bank_b_get_brightness(struct backlight_device *bl)
@@ -296,7 +299,7 @@ static int lm3630a_bank_b_get_brightness(struct backlight_device *bl)
 		if (rval < 0)
 			goto out_i2c_err;
 		brightness |= rval;
-		return brightness;
+		goto out;
 	}
 
 	/* disable sleep */
@@ -307,8 +310,11 @@ static int lm3630a_bank_b_get_brightness(struct backlight_device *bl)
 	rval = lm3630a_read(pchip, REG_BRT_B);
 	if (rval < 0)
 		goto out_i2c_err;
-	return rval;
+	brightness = rval;
 
+out:
+	bl->props.brightness = brightness;
+	return bl->props.brightness;
 out_i2c_err:
 	dev_err(pchip->dev, "i2c failed to access register\n");
 	return 0;
@@ -325,7 +331,6 @@ static int lm3630a_backlight_register(struct lm3630a_chip *pchip)
 	struct backlight_properties props;
 	struct lm3630a_platform_data *pdata = pchip->pdata;
 
-	memset(&props, 0, sizeof(struct backlight_properties));
 	props.type = BACKLIGHT_RAW;
 	if (pdata->leda_ctrl != LM3630A_LEDA_DISABLE) {
 		props.brightness = pdata->leda_init_brt;

@@ -79,7 +79,11 @@ int fb_deferred_io_fsync(struct file *file, loff_t start, loff_t end, int datasy
 		return 0;
 
 	mutex_lock(&inode->i_mutex);
-	flush_delayed_work(&info->deferred_work);
+	/* Kill off the delayed work */
+	cancel_delayed_work_sync(&info->deferred_work);
+
+	/* Run it immediately */
+	schedule_delayed_work(&info->deferred_work, 0);
 	mutex_unlock(&inode->i_mutex);
 
 	return 0;

@@ -1397,7 +1397,7 @@ int test_pages_in_a_zone(unsigned long start_pfn, unsigned long end_pfn,
 			while ((i < MAX_ORDER_NR_PAGES) &&
 				!pfn_valid_within(pfn + i))
 				i++;
-			if (i == MAX_ORDER_NR_PAGES || pfn + i >= end_pfn)
+			if (i == MAX_ORDER_NR_PAGES)
 				continue;
 			/* Check if we got outside of the zone */
 			if (zone && !zone_spans_pfn(zone, pfn + i))
@@ -1414,7 +1414,7 @@ int test_pages_in_a_zone(unsigned long start_pfn, unsigned long end_pfn,
 
 	if (zone) {
 		*valid_start = start;
-		*valid_end = min(end, end_pfn);
+		*valid_end = end;
 		return 1;
 	} else {
 		return 0;
@@ -1947,8 +1947,7 @@ static int check_memblock_offlined_cb(struct memory_block *mem, void *arg)
 
 		beginpa = PFN_PHYS(section_nr_to_pfn(mem->start_section_nr));
 		endpa = PFN_PHYS(section_nr_to_pfn(mem->end_section_nr + 1))-1;
-		pr_warn("removing memory fails, because memory "
-			"[%pa-%pa] is onlined\n",
+		pr_warn("removing memory fails, because memory [%pa-%pa] is onlined\n",
 			&beginpa, &endpa);
 	}
 

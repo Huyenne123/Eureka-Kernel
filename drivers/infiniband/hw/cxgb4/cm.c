@@ -360,8 +360,6 @@ static struct sk_buff *get_skb(struct sk_buff *skb, int len, gfp_t gfp)
 		skb_reset_transport_header(skb);
 	} else {
 		skb = alloc_skb(len, gfp);
-		if (!skb)
-			return NULL;
 	}
 	t4_set_arp_err_handler(skb, NULL, NULL);
 	return skb;
@@ -1117,8 +1115,6 @@ static int act_establish(struct c4iw_dev *dev, struct sk_buff *skb)
 	struct tid_info *t = dev->rdev.lldi.tids;
 
 	ep = lookup_atid(t, atid);
-	if (!ep)
-		return -EINVAL;
 
 	PDBG("%s ep %p tid %u snd_isn %u rcv_isn %u\n", __func__, ep, tid,
 	     be32_to_cpu(req->snd_isn), be32_to_cpu(req->rcv_isn));
@@ -1826,9 +1822,6 @@ static void send_fw_act_open_req(struct c4iw_ep *ep, unsigned int atid)
 	int win;
 
 	skb = get_skb(NULL, sizeof(*req), GFP_KERNEL);
-	if (!skb)
-		return -ENOMEM;
-
 	req = (struct fw_ofld_connection_wr *)__skb_put(skb, sizeof(*req));
 	memset(req, 0, sizeof(*req));
 	req->op_compl = htonl(WR_OP_V(FW_OFLD_CONNECTION_WR));
@@ -1949,7 +1942,7 @@ static int import_ep(struct c4iw_ep *ep, int iptype, __u8 *peer_ip,
 	err = -ENOMEM;
 	if (n->dev->flags & IFF_LOOPBACK) {
 		if (iptype == 4)
-			pdev = __ip_dev_find(&init_net, *(__be32 *)peer_ip, false);
+			pdev = ip_dev_find(&init_net, *(__be32 *)peer_ip);
 		else if (IS_ENABLED(CONFIG_IPV6))
 			for_each_netdev(&init_net, pdev) {
 				if (ipv6_chk_addr(&init_net,
@@ -1964,8 +1957,6 @@ static int import_ep(struct c4iw_ep *ep, int iptype, __u8 *peer_ip,
 			err = -ENODEV;
 			goto out;
 		}
-		if (is_vlan_dev(pdev))
-			pdev = vlan_dev_real_dev(pdev);
 		ep->l2t = cxgb4_l2t_get(cdev->rdev.lldi.l2t,
 					n, pdev, 0);
 		if (!ep->l2t)
@@ -1983,6 +1974,7 @@ static int import_ep(struct c4iw_ep *ep, int iptype, __u8 *peer_ip,
 		ep->rss_qid = cdev->rdev.lldi.rxq_ids[
 			cxgb4_port_idx(pdev) * step];
 		set_tcp_window(ep, (struct port_info *)netdev_priv(pdev));
+		dev_put(pdev);
 	} else {
 		pdev = get_real_dev(n->dev);
 		ep->l2t = cxgb4_l2t_get(cdev->rdev.lldi.l2t,
@@ -2117,9 +2109,6 @@ static int act_open_rpl(struct c4iw_dev *dev, struct sk_buff *skb)
 	struct sockaddr_in6 *ra6;
 
 	ep = lookup_atid(t, atid);
-	if (!ep)
-		return -EINVAL;
-
 	la = (struct sockaddr_in *)&ep->com.mapped_local_addr;
 	ra = (struct sockaddr_in *)&ep->com.mapped_remote_addr;
 	la6 = (struct sockaddr_in6 *)&ep->com.mapped_local_addr;
@@ -3450,14 +3439,13 @@ int c4iw_destroy_listen(struct iw_cm_id *cm_id)
 	    ep->com.local_addr.ss_family == AF_INET) {
 		err = cxgb4_remove_server_filter(
 			ep->com.dev->rdev.lldi.ports[0], ep->stid,
-			ep->com.dev->rdev.lldi.rxq_ids[0], false);
+			ep->com.dev->rdev.lldi.rxq_ids[0], 0);
 	} else {
 		struct sockaddr_in6 *sin6;
 		c4iw_init_wr_wait(&ep->com.wr_wait);
 		err = cxgb4_remove_server(
 				ep->com.dev->rdev.lldi.ports[0], ep->stid,
-				ep->com.dev->rdev.lldi.rxq_ids[0],
-				ep->com.local_addr.ss_family == AF_INET6);
+				ep->com.dev->rdev.lldi.rxq_ids[0], 0);
 		if (err)
 			goto done;
 		err = c4iw_wait_for_reply(&ep->com.dev->rdev, &ep->com.wr_wait,
@@ -3681,7 +3669,11 @@ static void build_cpl_pass_accept_req(struct sk_buff *skb, int stid , u8 tos)
 	 */
 	memset(&tmp_opt, 0, sizeof(tmp_opt));
 	tcp_clear_options(&tmp_opt);
+#ifdef CONFIG_MPTCP
+	tcp_parse_options(skb, &tmp_opt, NULL, 0, NULL, NULL);
+#else
 	tcp_parse_options(skb, &tmp_opt, 0, NULL);
+#endif
 
 	req = (struct cpl_pass_accept_req *)__skb_push(skb, sizeof(*req));
 	memset(req, 0, sizeof(*req));

@@ -926,11 +926,8 @@ static int
 isert_connect_error(struct rdma_cm_id *cma_id)
 {
 	struct isert_conn *isert_conn = cma_id->qp->qp_context;
-	struct isert_np *isert_np = cma_id->context;
 
-	mutex_lock(&isert_np->mutex);
 	list_del_init(&isert_conn->node);
-	mutex_unlock(&isert_np->mutex);
 	isert_conn->cm_id = NULL;
 	isert_put_conn(isert_conn);
 
@@ -3209,7 +3206,6 @@ isert_free_np(struct iscsi_np *np)
 {
 	struct isert_np *isert_np = np->np_context;
 	struct isert_conn *isert_conn, *n;
-	LIST_HEAD(drop_conn_list);
 
 	if (isert_np->cm_id)
 		rdma_destroy_id(isert_np->cm_id);
@@ -3229,7 +3225,7 @@ isert_free_np(struct iscsi_np *np)
 					 node) {
 			isert_info("cleaning isert_conn %p state (%d)\n",
 				   isert_conn, isert_conn->state);
-			list_move_tail(&isert_conn->node, &drop_conn_list);
+			isert_connect_release(isert_conn);
 		}
 	}
 
@@ -3240,15 +3236,10 @@ isert_free_np(struct iscsi_np *np)
 					 node) {
 			isert_info("cleaning isert_conn %p state (%d)\n",
 				   isert_conn, isert_conn->state);
-			list_move_tail(&isert_conn->node, &drop_conn_list);
+			isert_connect_release(isert_conn);
 		}
 	}
 	mutex_unlock(&isert_np->mutex);
-
-	list_for_each_entry_safe(isert_conn, n, &drop_conn_list, node) {
-		list_del_init(&isert_conn->node);
-		isert_connect_release(isert_conn);
-	}
 
 	np->np_context = NULL;
 	kfree(isert_np);
@@ -3287,6 +3278,17 @@ isert_wait4logout(struct isert_conn *isert_conn)
 }
 
 static void
+isert_wait4cmds(struct iscsi_conn *conn)
+{
+	isert_info("iscsi_conn %p\n", conn);
+
+	if (conn->sess) {
+		target_sess_cmd_list_set_waiting(conn->sess->se_sess);
+		target_wait_for_sess_cmds(conn->sess->se_sess);
+	}
+}
+
+static void
 isert_wait4flush(struct isert_conn *isert_conn)
 {
 	struct ib_recv_wr *bad_wr;
@@ -3302,17 +3304,6 @@ isert_wait4flush(struct isert_conn *isert_conn)
 	}
 
 	wait_for_completion(&isert_conn->wait_comp_err);
-}
-
-static void
-isert_wait4cmds(struct iscsi_conn *conn)
-{
-	isert_info("iscsi_conn %p\n", conn);
-
-	if (conn->sess) {
-		target_sess_cmd_list_set_waiting(conn->sess->se_sess);
-		target_wait_for_sess_cmds(conn->sess->se_sess);
-	}
 }
 
 /**

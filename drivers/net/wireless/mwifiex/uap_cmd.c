@@ -286,8 +286,6 @@ mwifiex_set_uap_rates(struct mwifiex_uap_bss_param *bss_cfg,
 
 	rate_ie = (void *)cfg80211_find_ie(WLAN_EID_SUPP_RATES, var_pos, len);
 	if (rate_ie) {
-		if (rate_ie->len > MWIFIEX_SUPPORTED_RATES)
-			return;
 		memcpy(bss_cfg->rates, rate_ie + 1, rate_ie->len);
 		rate_len = rate_ie->len;
 	}
@@ -295,11 +293,8 @@ mwifiex_set_uap_rates(struct mwifiex_uap_bss_param *bss_cfg,
 	rate_ie = (void *)cfg80211_find_ie(WLAN_EID_EXT_SUPP_RATES,
 					   params->beacon.tail,
 					   params->beacon.tail_len);
-	if (rate_ie) {
-		if (rate_ie->len > MWIFIEX_SUPPORTED_RATES - rate_len)
-			return;
+	if (rate_ie)
 		memcpy(bss_cfg->rates + rate_len, rate_ie + 1, rate_ie->len);
-	}
 
 	return;
 }
@@ -417,8 +412,6 @@ mwifiex_set_wmm_params(struct mwifiex_private *priv,
 					    params->beacon.tail_len);
 	if (vendor_ie) {
 		wmm_ie = (struct ieee_types_header *)vendor_ie;
-		if (*(vendor_ie + 1) > sizeof(struct mwifiex_types_wmm_info))
-			return;
 		memcpy(&bss_cfg->wmm_info, wmm_ie + 1,
 		       sizeof(bss_cfg->wmm_info));
 		priv->wmm_enabled = 1;
@@ -478,7 +471,6 @@ mwifiex_uap_bss_wep(u8 **tlv_buf, void *cmd_buf, u16 *param_size)
 static int
 mwifiex_uap_bss_param_prepare(u8 *tlv, void *cmd_buf, u16 *param_size)
 {
-	struct host_cmd_tlv_mac_addr *mac_tlv;
 	struct host_cmd_tlv_dtim_period *dtim_period;
 	struct host_cmd_tlv_beacon_period *beacon_period;
 	struct host_cmd_tlv_ssid *ssid;
@@ -497,13 +489,6 @@ mwifiex_uap_bss_param_prepare(u8 *tlv, void *cmd_buf, u16 *param_size)
 	struct mwifiex_uap_bss_param *bss_cfg = cmd_buf;
 	int i;
 	u16 cmd_size = *param_size;
-
-	mac_tlv = (struct host_cmd_tlv_mac_addr *)tlv;
-	mac_tlv->header.type = cpu_to_le16(TLV_TYPE_UAP_MAC_ADDRESS);
-	mac_tlv->header.len = cpu_to_le16(ETH_ALEN);
-	memcpy(mac_tlv->mac_addr, bss_cfg->mac_addr, ETH_ALEN);
-	cmd_size += sizeof(struct host_cmd_tlv_mac_addr);
-	tlv += sizeof(struct host_cmd_tlv_mac_addr);
 
 	if (bss_cfg->ssid.ssid_len) {
 		ssid = (struct host_cmd_tlv_ssid *)tlv;

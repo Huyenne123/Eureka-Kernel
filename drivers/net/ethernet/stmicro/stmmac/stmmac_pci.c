@@ -36,7 +36,6 @@
  */
 struct stmmac_pci_dmi_data {
 	const char *name;
-	const char *asset_tag;
 	unsigned int func;
 	int phy_addr;
 };
@@ -51,7 +50,6 @@ struct stmmac_pci_info {
 static int stmmac_pci_find_phy_addr(struct stmmac_pci_info *info)
 {
 	const char *name = dmi_get_system_info(DMI_BOARD_NAME);
-	const char *asset_tag = dmi_get_system_info(DMI_BOARD_ASSET_TAG);
 	unsigned int func = PCI_FUNC(info->pdev->devfn);
 	struct stmmac_pci_dmi_data *dmi;
 
@@ -63,12 +61,8 @@ static int stmmac_pci_find_phy_addr(struct stmmac_pci_info *info)
 		return 1;
 
 	for (dmi = info->dmi; dmi->name && *dmi->name; dmi++) {
-		if (!strcmp(dmi->name, name) && dmi->func == func) {
-			/* If asset tag is provided, match on it as well. */
-			if (dmi->asset_tag && strcmp(dmi->asset_tag, asset_tag))
-				continue;
+		if (!strcmp(dmi->name, name) && dmi->func == func)
 			return dmi->phy_addr;
-		}
 	}
 
 	return -ENODEV;
@@ -142,24 +136,6 @@ static struct stmmac_pci_dmi_data quark_pci_dmi_data[] = {
 	{
 		.name = "GalileoGen2",
 		.func = 6,
-		.phy_addr = 1,
-	},
-	{
-		.name = "SIMATIC IOT2000",
-		.asset_tag = "6ES7647-0AA00-0YA2",
-		.func = 6,
-		.phy_addr = 1,
-	},
-	{
-		.name = "SIMATIC IOT2000",
-		.asset_tag = "6ES7647-0AA00-1YA2",
-		.func = 6,
-		.phy_addr = 1,
-	},
-	{
-		.name = "SIMATIC IOT2000",
-		.asset_tag = "6ES7647-0AA00-1YA2",
-		.func = 7,
 		.phy_addr = 1,
 	},
 	{}

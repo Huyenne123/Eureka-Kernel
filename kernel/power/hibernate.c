@@ -647,7 +647,7 @@ static void power_down(void)
  */
 int hibernate(void)
 {
-	int error;
+	int error, nr_calls = 0;
 
 	if (!hibernation_available()) {
 		pr_debug("PM: Hibernation not available.\n");
@@ -662,9 +662,11 @@ int hibernate(void)
 	}
 
 	pm_prepare_console();
-	error = pm_notifier_call_chain(PM_HIBERNATION_PREPARE);
-	if (error)
+	error = __pm_notifier_call_chain(PM_HIBERNATION_PREPARE, -1, &nr_calls);
+	if (error) {
+		nr_calls--;
 		goto Exit;
+	}
 
 	printk(KERN_INFO "PM: Syncing filesystems ... ");
 	sys_sync();
@@ -714,7 +716,7 @@ int hibernate(void)
 	/* Don't bother checking whether freezer_test_done is true */
 	freezer_test_done = false;
  Exit:
-	pm_notifier_call_chain(PM_POST_HIBERNATION);
+	__pm_notifier_call_chain(PM_POST_HIBERNATION, nr_calls, NULL);
 	pm_restore_console();
 	atomic_inc(&snapshot_device_available);
  Unlock:
@@ -740,7 +742,7 @@ int hibernate(void)
  */
 static int software_resume(void)
 {
-	int error;
+	int error, nr_calls = 0;
 	unsigned int flags;
 
 	/*
@@ -779,6 +781,17 @@ static int software_resume(void)
 
 	/* Check if the device is there */
 	swsusp_resume_device = name_to_dev_t(resume_file);
+
+	/*
+	 * name_to_dev_t is ineffective to verify parition if resume_file is in
+	 * integer format. (e.g. major:minor)
+	 */
+	if (isdigit(resume_file[0]) && resume_wait) {
+		int partno;
+		while (!get_gendisk(swsusp_resume_device, &partno))
+			msleep(10);
+	}
+
 	if (!swsusp_resume_device) {
 		/*
 		 * Some device discovery might still be in progress; we need
@@ -816,9 +829,11 @@ static int software_resume(void)
 	}
 
 	pm_prepare_console();
-	error = pm_notifier_call_chain(PM_RESTORE_PREPARE);
-	if (error)
+	error = __pm_notifier_call_chain(PM_RESTORE_PREPARE, -1, &nr_calls);
+	if (error) {
+		nr_calls--;
 		goto Close_Finish;
+	}
 
 	pr_debug("PM: Preparing processes for restore.\n");
 	error = freeze_processes();
@@ -844,7 +859,7 @@ static int software_resume(void)
 	unlock_device_hotplug();
 	thaw_processes();
  Finish:
-	pm_notifier_call_chain(PM_POST_RESTORE);
+	__pm_notifier_call_chain(PM_POST_RESTORE, nr_calls, NULL);
 	pm_restore_console();
 	atomic_inc(&snapshot_device_available);
 	/* For success case, the suspend path will release the lock */
@@ -1132,7 +1147,7 @@ static int __init resumedelay_setup(char *str)
 	int rc = kstrtouint(str, 0, &resume_delay);
 
 	if (rc)
-		pr_warn("resumedelay: bad option string '%s'\n", str);
+		return rc;
 	return 1;
 }
 
@@ -1148,22 +1163,6 @@ static int __init kaslr_nohibernate_setup(char *str)
 	return nohibernate_setup(str);
 }
 
-static int __init page_poison_nohibernate_setup(char *str)
-{
-#ifdef CONFIG_PAGE_POISONING_ZERO
-	/*
-	 * The zeroing option for page poison skips the checks on alloc.
-	 * since hibernation doesn't save free pages there's no way to
-	 * guarantee the pages will still be zeroed.
-	 */
-	if (!strcmp(str, "on")) {
-		pr_info("Disabling hibernation due to page poisoning\n");
-		return nohibernate_setup(str);
-	}
-#endif
-	return 1;
-}
-
 __setup("noresume", noresume_setup);
 __setup("resume_offset=", resume_offset_setup);
 __setup("resume=", resume_setup);
@@ -1172,4 +1171,3 @@ __setup("resumewait", resumewait_setup);
 __setup("resumedelay=", resumedelay_setup);
 __setup("nohibernate", nohibernate_setup);
 __setup("kaslr", kaslr_nohibernate_setup);
-__setup("page_poison=", page_poison_nohibernate_setup);

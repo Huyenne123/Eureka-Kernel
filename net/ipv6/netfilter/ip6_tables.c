@@ -339,7 +339,6 @@ ip6t_do_table(struct sk_buff *skb,
 	 * things we don't know, ie. tcp syn flag or ports).  If the
 	 * rule is also a fragment-specific rule, non-fragments won't
 	 * match it. */
-	acpar.fragoff = 0;
 	acpar.hotdrop = false;
 	acpar.net     = state->net;
 	acpar.in      = state->in;
@@ -417,6 +416,7 @@ ip6t_do_table(struct sk_buff *skb,
 					verdict = (unsigned int)(-v) - 1;
 					break;
 				}
+
 				if (stackidx == 0)
 					e = get_entry(table_base,
 					    private->underflow[hook]);
@@ -837,6 +837,7 @@ translate_table(struct net *net, struct xt_table_info *newinfo, void *entry0,
 	if (!offsets)
 		return -ENOMEM;
 	i = 0;
+
 	/* Walk through entries, checking offsets. */
 	xt_entry_foreach(iter, entry0, newinfo->size) {
 		ret = check_entry_size_and_hooks(iter, newinfo, entry0,
@@ -850,8 +851,9 @@ translate_table(struct net *net, struct xt_table_info *newinfo, void *entry0,
 			offsets[i] = (void *)iter - entry0;
 		++i;
 		if (strcmp(ip6t_get_target(iter)->u.user.name,
-		    XT_ERROR_TARGET) == 0)
+		    XT_ERROR_TARGET) == 0) {
 			++newinfo->stacksize;
+		}
 	}
 
 	ret = -EINVAL;
@@ -1317,6 +1319,7 @@ do_replace(struct net *net, const void __user *user, unsigned int len)
 
 	ret = __do_replace(net, tmp.name, tmp.valid_hooks, newinfo,
 			   tmp.num_counters, tmp.counters);
+
 	if (ret)
 		goto free_newinfo_untrans;
 	return 0;
@@ -1617,8 +1620,6 @@ translate_compat_table(struct net *net,
 	newinfo = xt_alloc_table_info(size);
 	if (!newinfo)
 		goto out_unlock;
-
-	memset(newinfo->entries, 0, size);
 
 	newinfo->number = compatr->num_entries;
 	for (i = 0; i < NF_INET_NUMHOOKS; i++) {

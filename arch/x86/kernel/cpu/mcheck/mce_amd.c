@@ -76,6 +76,7 @@ void (*deferred_error_int_vector)(void) = default_deferred_error_interrupt;
 
 struct thresh_restart {
 	struct threshold_block	*b;
+	int			reset;
 	int			set_lvt_off;
 	int			lvt_off;
 	u16			old_limit;
@@ -154,13 +155,13 @@ static void threshold_restart_bank(void *_tr)
 
 	rdmsr(tr->b->address, lo, hi);
 
-	/*
-	 * Reset error count and overflow bit.
-	 * This is done during init or after handling an interrupt.
-	 */
-	if (hi & MASK_OVERFLOW_HI || tr->set_lvt_off) {
-		hi &= ~(MASK_ERR_COUNT_HI | MASK_OVERFLOW_HI);
-		hi |= THRESHOLD_MAX - tr->b->threshold_limit;
+	if (tr->b->threshold_limit < (hi & THRESHOLD_MAX))
+		tr->reset = 1;	/* limit cannot be lower than err count */
+
+	if (tr->reset) {		/* reset err count and overflow bit */
+		hi =
+		    (hi & ~(MASK_ERR_COUNT_HI | MASK_OVERFLOW_HI)) |
+		    (THRESHOLD_MAX - tr->b->threshold_limit);
 	} else if (tr->old_limit) {	/* change limit w/o reset */
 		int new_count = (hi & THRESHOLD_MAX) +
 		    (tr->old_limit - tr->b->threshold_limit);
@@ -559,12 +560,9 @@ static const struct sysfs_ops threshold_ops = {
 	.store			= store,
 };
 
-static void threshold_block_release(struct kobject *kobj);
-
 static struct kobj_type threshold_ktype = {
 	.sysfs_ops		= &threshold_ops,
 	.default_attrs		= default_attrs,
-	.release		= threshold_block_release,
 };
 
 static int allocate_threshold_blocks(unsigned int cpu, unsigned int bank,
@@ -767,12 +765,8 @@ static int threshold_create_device(unsigned int cpu)
 	return err;
 }
 
-static void threshold_block_release(struct kobject *kobj)
-{
-	kfree(to_block(kobj));
-}
-
-static void deallocate_threshold_block(unsigned int cpu, unsigned int bank)
+static void deallocate_threshold_block(unsigned int cpu,
+						 unsigned int bank)
 {
 	struct threshold_block *pos = NULL;
 	struct threshold_block *tmp = NULL;
@@ -782,11 +776,13 @@ static void deallocate_threshold_block(unsigned int cpu, unsigned int bank)
 		return;
 
 	list_for_each_entry_safe(pos, tmp, &head->blocks->miscj, miscj) {
-		list_del(&pos->miscj);
 		kobject_put(&pos->kobj);
+		list_del(&pos->miscj);
+		kfree(pos);
 	}
 
-	kobject_put(&head->blocks->kobj);
+	kfree(per_cpu(threshold_banks, cpu)[bank]->blocks);
+	per_cpu(threshold_banks, cpu)[bank]->blocks = NULL;
 }
 
 static void __threshold_remove_blocks(struct threshold_bank *b)

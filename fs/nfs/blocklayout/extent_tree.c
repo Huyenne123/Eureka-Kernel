@@ -515,15 +515,6 @@ static int ext_tree_encode_commit(struct pnfs_block_layout *bl, __be32 *p,
 	return ret;
 }
 
-/**
- * ext_tree_prepare_commit - encode extents that need to be committed
- * @arg: layout commit data
- *
- * Return values:
- *   %0: Success, all required extents are encoded
- *   %-ENOSPC: Some extents are encoded, but not all, due to RPC size limit
- *   %-ENOMEM: Out of memory, extents not encoded
- */
 int
 ext_tree_prepare_commit(struct nfs4_layoutcommit_args *arg)
 {
@@ -540,11 +531,12 @@ ext_tree_prepare_commit(struct nfs4_layoutcommit_args *arg)
 	start_p = page_address(arg->layoutupdate_page);
 	arg->layoutupdate_pages = &arg->layoutupdate_page;
 
+retry:
 	ret = ext_tree_encode_commit(bl, start_p + 1, buffer_size, &count);
 	if (unlikely(ret)) {
 		ext_tree_free_commitdata(arg, buffer_size);
 
-		buffer_size = NFS_SERVER(arg->inode)->wsize;
+		buffer_size = ext_tree_layoutupdate_size(count);
 		count = 0;
 
 		arg->layoutupdate_pages =
@@ -559,8 +551,7 @@ ext_tree_prepare_commit(struct nfs4_layoutcommit_args *arg)
 			return -ENOMEM;
 		}
 
-		ret = ext_tree_encode_commit(bl, start_p + 1, buffer_size,
-				&count);
+		goto retry;
 	}
 
 	*start_p = cpu_to_be32(count);
@@ -575,7 +566,7 @@ ext_tree_prepare_commit(struct nfs4_layoutcommit_args *arg)
 	}
 
 	dprintk("%s found %zu ranges\n", __func__, count);
-	return ret;
+	return 0;
 }
 
 void

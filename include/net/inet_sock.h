@@ -91,7 +91,13 @@ struct inet_request_sock {
 				wscale_ok  : 1,
 				ecn_ok	   : 1,
 				acked	   : 1,
+#ifdef CONFIG_MPTCP
+				no_srccheck: 1,
+				mptcp_rqsk : 1,
+				saw_mpc    : 1;
+#else
 				no_srccheck: 1;
+#endif
 	kmemcheck_bitfield_end(flags);
 	u32                     ir_mark;
 	union {
@@ -107,8 +113,7 @@ static inline struct inet_request_sock *inet_rsk(const struct request_sock *sk)
 
 static inline u32 inet_request_mark(const struct sock *sk, struct sk_buff *skb)
 {
-	if (!sk->sk_mark &&
-	    READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_fwmark_accept))
+	if (!sk->sk_mark && sock_net(sk)->ipv4.sysctl_tcp_fwmark_accept)
 		return skb->mark;
 
 	return sk->sk_mark;

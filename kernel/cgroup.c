@@ -1551,9 +1551,9 @@ static int rebind_subsystems(struct cgroup_root *dst_root,
 		RCU_INIT_POINTER(scgrp->subsys[ssid], NULL);
 		rcu_assign_pointer(dcgrp->subsys[ssid], css);
 		ss->root = dst_root;
+		css->cgroup = dcgrp;
 
 		spin_lock_irq(&css_set_lock);
-		css->cgroup = dcgrp;
 		hash_for_each(css_set_table, i, cset, hlist)
 			list_move_tail(&cset->e_cset_node[ss->id],
 				       &dcgrp->e_csets[ss->id]);
@@ -2694,7 +2694,8 @@ static int cgroup_procs_write_permission(struct task_struct *task,
 	 */
 	if (!uid_eq(cred->euid, GLOBAL_ROOT_UID) &&
 	    !uid_eq(cred->euid, tcred->uid) &&
-	    !uid_eq(cred->euid, tcred->suid))
+	    !uid_eq(cred->euid, tcred->suid) &&
+	    !ns_capable(tcred->user_ns, CAP_SYS_NICE))
 		ret = -EACCES;
 
 	if (!ret && cgroup_on_dfl(dst_cgrp)) {
@@ -3309,10 +3310,6 @@ static int cgroup_rename(struct kernfs_node *kn, struct kernfs_node *new_parent,
 {
 	struct cgroup *cgrp = kn->priv;
 	int ret;
-
-	/* do not accept '\n' to prevent making /proc/<pid>/cgroup unparsable */
-	if (strchr(new_name_str, '\n'))
-		return -EINVAL;
 
 	if (kernfs_type(kn) != KERNFS_DIR)
 		return -ENOTDIR;
@@ -4363,6 +4360,9 @@ static int pidlist_array_load(struct cgroup *cgrp, enum cgroup_filetype type,
 	while ((tsk = css_task_iter_next(&it))) {
 		if (unlikely(n == length))
 			break;
+		/* avoid the use-after-free for task */
+		if (unlikely(tsk->state == TASK_DEAD))
+			continue;
 		/* get tgid or pid for procs or tasks file respectively */
 		if (type == CGROUP_FILE_PROCS)
 			pid = task_tgid_vnr(tsk);
@@ -5343,6 +5343,12 @@ int __init cgroup_init(void)
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_dfl_base_files));
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_legacy_base_files));
 
+	/*
+	 * The latency of the synchronize_sched() is too high for cgroups,
+	 * avoid it at the cost of forcing all readers into the slow path.
+	 */
+	rcu_sync_enter_start(&cgroup_threadgroup_rwsem.rss);
+
 	mutex_lock(&cgroup_mutex);
 
 	/* Add init_css_set to the hash table */
@@ -5952,7 +5958,7 @@ static int cgroup_css_links_read(struct seq_file *seq, void *v)
 		struct task_struct *task;
 		int count = 0;
 
-		seq_printf(seq, "css_set %p\n", cset);
+		seq_printf(seq, "css_set %pK\n", cset);
 
 		list_for_each_entry(task, &cset->tasks, cg_list) {
 			if (count++ > MAX_TASKS_SHOWN_PER_CSS)

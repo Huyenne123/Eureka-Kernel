@@ -413,8 +413,7 @@ void rs600_hpd_init(struct radeon_device *rdev)
 		default:
 			break;
 		}
-		if (radeon_connector->hpd.hpd != RADEON_HPD_NONE)
-			enable |= 1 << radeon_connector->hpd.hpd;
+		enable |= 1 << radeon_connector->hpd.hpd;
 		radeon_hpd_set_polarity(rdev, radeon_connector->hpd.hpd);
 	}
 	radeon_irq_kms_enable_hpd(rdev, enable);
@@ -440,8 +439,7 @@ void rs600_hpd_fini(struct radeon_device *rdev)
 		default:
 			break;
 		}
-		if (radeon_connector->hpd.hpd != RADEON_HPD_NONE)
-			disable |= 1 << radeon_connector->hpd.hpd;
+		disable |= 1 << radeon_connector->hpd.hpd;
 	}
 	radeon_irq_kms_disable_hpd(rdev, disable);
 }

@@ -72,8 +72,8 @@ static int e_class = ELFCLASS32;
 #define PUT_16BE(off, v)(buf[off] = ((v) >> 8) & 0xff, \
 			 buf[(off) + 1] = (v) & 0xff)
 #define PUT_32BE(off, v)(PUT_16BE((off), (v) >> 16L), PUT_16BE((off) + 2, (v)))
-#define PUT_64BE(off, v)((PUT_32BE((off), (unsigned long long)(v) >> 32L), \
-			  PUT_32BE((off) + 4, (unsigned long long)(v))))
+#define PUT_64BE(off, v)((PUT_32BE((off), (v) >> 32L), \
+			  PUT_32BE((off) + 4, (v))))
 
 #define GET_16LE(off)	((buf[off]) + (buf[(off)+1] << 8))
 #define GET_32LE(off)	(GET_16LE(off) + (GET_16LE((off)+2U) << 16U))
@@ -82,8 +82,7 @@ static int e_class = ELFCLASS32;
 #define PUT_16LE(off, v) (buf[off] = (v) & 0xff, \
 			  buf[(off) + 1] = ((v) >> 8) & 0xff)
 #define PUT_32LE(off, v) (PUT_16LE((off), (v)), PUT_16LE((off) + 2, (v) >> 16L))
-#define PUT_64LE(off, v) (PUT_32LE((off), (unsigned long long)(v)), \
-			  PUT_32LE((off) + 4, (unsigned long long)(v) >> 32L))
+#define PUT_64LE(off, v) (PUT_32LE((off), (v)), PUT_32LE((off) + 4, (v) >> 32L))
 
 #define GET_16(off)	(e_data == ELFDATA2MSB ? GET_16BE(off) : GET_16LE(off))
 #define GET_32(off)	(e_data == ELFDATA2MSB ? GET_32BE(off) : GET_32LE(off))
@@ -224,11 +223,7 @@ main(int ac, char **av)
 	PUT_16(E_PHNUM, np + 2);
 
 	/* write back */
-	i = lseek(fd, (long) 0, SEEK_SET);
-	if (i < 0) {
-		perror("lseek");
-		exit(1);
-	}
+	lseek(fd, (long) 0, SEEK_SET);
 	i = write(fd, buf, n);
 	if (i < 0) {
 		perror("write");

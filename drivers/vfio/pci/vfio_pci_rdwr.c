@@ -18,7 +18,6 @@
 #include <linux/uaccess.h>
 #include <linux/io.h>
 #include <linux/vgaarb.h>
-#include <linux/io-64-nonatomic-lo-hi.h>
 
 #include "vfio_pci_private.h"
 

@@ -28,7 +28,6 @@
 #include "wmi-ops.h"
 #include "p2p.h"
 #include "hw.h"
-#include "hif.h"
 
 /* MAIN WMI cmd track */
 static struct wmi_cmd_map wmi_cmd_map = {
@@ -1582,32 +1581,12 @@ void ath10k_wmi_put_wmi_channel(struct wmi_channel *ch,
 
 int ath10k_wmi_wait_for_service_ready(struct ath10k *ar)
 {
-	unsigned long time_left, i;
+	unsigned long time_left;
 
 	time_left = wait_for_completion_timeout(&ar->wmi.service_ready,
 						WMI_SERVICE_READY_TIMEOUT_HZ);
-	if (!time_left) {
-		/* Sometimes the PCI HIF doesn't receive interrupt
-		 * for the service ready message even if the buffer
-		 * was completed. PCIe sniffer shows that it's
-		 * because the corresponding CE ring doesn't fires
-		 * it. Workaround here by polling CE rings once.
-		 */
-		ath10k_warn(ar, "failed to receive service ready completion, polling..\n");
-
-		for (i = 0; i < CE_COUNT; i++)
-			ath10k_hif_send_complete_check(ar, i, 1);
-
-		time_left = wait_for_completion_timeout(&ar->wmi.service_ready,
-							WMI_SERVICE_READY_TIMEOUT_HZ);
-		if (!time_left) {
-			ath10k_warn(ar, "polling timed out\n");
-			return -ETIMEDOUT;
-		}
-
-		ath10k_warn(ar, "service ready completion received, continuing normally\n");
-	}
-
+	if (!time_left)
+		return -ETIMEDOUT;
 	return 0;
 }
 
@@ -1752,7 +1731,6 @@ int ath10k_wmi_cmd_send(struct ath10k *ar, struct sk_buff *skb, u32 cmd_id)
 	if (cmd_id == WMI_CMD_UNSUPPORTED) {
 		ath10k_warn(ar, "wmi command %d is not supported by firmware\n",
 			    cmd_id);
-		dev_kfree_skb_any(skb);
 		return ret;
 	}
 
@@ -2316,8 +2294,7 @@ int ath10k_wmi_event_mgmt_rx(struct ath10k *ar, struct sk_buff *skb)
 		   status->freq, status->band, status->signal,
 		   status->rate_idx);
 
-	ieee80211_rx_ni(ar->hw, skb);
-
+	ieee80211_rx(ar->hw, skb);
 	return 0;
 }
 
@@ -2967,31 +2944,18 @@ void ath10k_wmi_event_vdev_start_resp(struct ath10k *ar, struct sk_buff *skb)
 {
 	struct wmi_vdev_start_ev_arg arg = {};
 	int ret;
-	u32 status;
 
 	ath10k_dbg(ar, ATH10K_DBG_WMI, "WMI_VDEV_START_RESP_EVENTID\n");
-
-	ar->last_wmi_vdev_start_status = 0;
 
 	ret = ath10k_wmi_pull_vdev_start(ar, skb, &arg);
 	if (ret) {
 		ath10k_warn(ar, "failed to parse vdev start event: %d\n", ret);
-		ar->last_wmi_vdev_start_status = ret;
-		goto out;
+		return;
 	}
 
-	status = __le32_to_cpu(arg.status);
-	if (WARN_ON_ONCE(status)) {
-		ath10k_warn(ar, "vdev-start-response reports status error: %d (%s)\n",
-			    status, (status == WMI_VDEV_START_CHAN_INVALID) ?
-			    "chan-invalid" : "unknown");
-		/* Setup is done one way or another though, so we should still
-		 * do the completion, so don't return here.
-		 */
-		ar->last_wmi_vdev_start_status = -EINVAL;
-	}
+	if (WARN_ON(__le32_to_cpu(arg.status)))
+		return;
 
-out:
 	complete(&ar->vdev_setup_done);
 }
 
@@ -4101,7 +4065,7 @@ static void ath10k_tpc_config_disp_tables(struct ath10k *ar,
 							    rate_code[i],
 							    type);
 			snprintf(buff, sizeof(buff), "%8d ", tpc[j]);
-			strlcat(tpc_value, buff, sizeof(tpc_value));
+			strncat(tpc_value, buff, strlen(buff));
 		}
 		tpc_stats->tpc_table[type].pream_idx[i] = pream_idx;
 		tpc_stats->tpc_table[type].rate_code[i] = rate_code[i];

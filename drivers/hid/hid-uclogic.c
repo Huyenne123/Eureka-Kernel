@@ -734,8 +734,10 @@ static int uclogic_input_mapping(struct hid_device *hdev, struct hid_input *hi,
 static int uclogic_input_configured(struct hid_device *hdev,
 		struct hid_input *hi)
 {
+	char *name;
 	const char *suffix = NULL;
 	struct hid_field *field;
+	size_t len;
 
 	/* no report associated (HID_QUIRK_MULTI_INPUT not set) */
 	if (!hi->report)
@@ -764,9 +766,14 @@ static int uclogic_input_configured(struct hid_device *hdev,
 		break;
 	}
 
-	if (suffix)
-		hi->input->name = devm_kasprintf(&hdev->dev, GFP_KERNEL,
-						 "%s %s", hdev->name, suffix);
+	if (suffix) {
+		len = strlen(hdev->name) + 2 + strlen(suffix);
+		name = devm_kzalloc(&hi->input->dev, len, GFP_KERNEL);
+		if (name) {
+			snprintf(name, len, "%s %s", hdev->name, suffix);
+			hi->input->name = name;
+		}
+	}
 
 	return 0;
 }
@@ -787,9 +794,6 @@ static int uclogic_tablet_enable(struct hid_device *hdev)
 	s32 resolution;
 	__u8 *p;
 	s32 v;
-
-	if (!hid_is_usb(hdev))
-		return -EINVAL;
 
 	/*
 	 * Read string descriptor containing tablet parameters. The specific

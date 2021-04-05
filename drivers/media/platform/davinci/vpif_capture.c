@@ -1417,6 +1417,8 @@ probe_out:
 		/* Unregister video device */
 		video_unregister_device(&ch->video_dev);
 	}
+	kfree(vpif_obj.sd);
+	v4l2_device_unregister(&vpif_obj.v4l2_dev);
 
 	return err;
 }
@@ -1433,7 +1435,7 @@ static int vpif_async_complete(struct v4l2_async_notifier *notifier)
  * This creates device entries by register itself to the V4L2 driver and
  * initializes fields of each channel objects
  */
-static int vpif_probe(struct platform_device *pdev)
+static __init int vpif_probe(struct platform_device *pdev)
 {
 	struct vpif_subdev_info *subdevdata;
 	struct i2c_adapter *i2c_adap;
@@ -1626,7 +1628,7 @@ static int vpif_resume(struct device *dev)
 
 static SIMPLE_DEV_PM_OPS(vpif_pm_ops, vpif_suspend, vpif_resume);
 
-static struct platform_driver vpif_driver = {
+static __refdata struct platform_driver vpif_driver = {
 	.driver	= {
 		.name	= VPIF_DRIVER_NAME,
 		.pm	= &vpif_pm_ops,

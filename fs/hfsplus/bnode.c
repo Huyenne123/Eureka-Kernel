@@ -68,12 +68,6 @@ void hfs_bnode_read_key(struct hfs_bnode *node, void *key, int off)
 	else
 		key_len = tree->max_key_len + 2;
 
-	if (key_len > sizeof(hfsplus_btree_key) || key_len < 1) {
-		memset(key, 0, sizeof(hfsplus_btree_key));
-		pr_err("hfsplus: Invalid key length: %d\n", key_len);
-		return;
-	}
-
 	hfs_bnode_read(node, key, off, key_len);
 }
 
@@ -440,7 +434,6 @@ static struct hfs_bnode *__hfs_bnode_create(struct hfs_btree *tree, u32 cnid)
 		tree->node_hash[hash] = node;
 		tree->node_hash_cnt++;
 	} else {
-		hfs_bnode_get(node2);
 		spin_unlock(&tree->hash_lock);
 		kfree(node);
 		wait_event(node2->lock_wq,
@@ -670,5 +663,6 @@ bool hfs_bnode_need_zeroout(struct hfs_btree *tree)
 	struct hfsplus_sb_info *sbi = HFSPLUS_SB(sb);
 	const u32 volume_attr = be32_to_cpu(sbi->s_vhdr->attributes);
 
-	return volume_attr & HFSPLUS_VOL_UNUSED_NODE_FIX;
+	return tree->cnid == HFSPLUS_CAT_CNID &&
+		volume_attr & HFSPLUS_VOL_UNUSED_NODE_FIX;
 }

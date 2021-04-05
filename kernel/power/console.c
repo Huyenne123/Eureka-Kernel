@@ -15,7 +15,6 @@
 #define SUSPEND_CONSOLE	(MAX_NR_CONSOLES-1)
 
 static int orig_fgconsole, orig_kmsg;
-static bool vt_switch_done;
 
 static DEFINE_MUTEX(vt_switch_mutex);
 
@@ -136,21 +135,17 @@ int pm_prepare_console(void)
 	if (orig_fgconsole < 0)
 		return 1;
 
-	vt_switch_done = true;
-
 	orig_kmsg = vt_kmsg_redirect(SUSPEND_CONSOLE);
 	return 0;
 }
 
 void pm_restore_console(void)
 {
-	if (!pm_vt_switch() && !vt_switch_done)
+	if (!pm_vt_switch())
 		return;
 
 	if (orig_fgconsole >= 0) {
 		vt_move_to_console(orig_fgconsole, 0);
 		vt_kmsg_redirect(orig_kmsg);
 	}
-
-	vt_switch_done = false;
 }

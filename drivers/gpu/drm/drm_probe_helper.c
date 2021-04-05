@@ -180,9 +180,8 @@ static int drm_helper_probe_single_connector_modes_merge_bits(struct drm_connect
 			 */
 			dev->mode_config.delayed_event = true;
 			if (dev->mode_config.poll_enabled)
-				mod_delayed_work(system_wq,
-						 &dev->mode_config.output_poll_work,
-						 0);
+				schedule_delayed_work(&dev->mode_config.output_poll_work,
+						      0);
 		}
 	}
 
@@ -338,9 +337,6 @@ static void output_poll_execute(struct work_struct *work)
 	struct drm_connector *connector;
 	enum drm_connector_status old_status;
 	bool repoll = false, changed;
-
-	if (!dev->mode_config.poll_enabled)
-		return;
 
 	/* Pick up any changes detected by the probe functions. */
 	changed = dev->mode_config.delayed_event;
@@ -505,11 +501,7 @@ EXPORT_SYMBOL(drm_kms_helper_poll_init);
  */
 void drm_kms_helper_poll_fini(struct drm_device *dev)
 {
-	if (!dev->mode_config.poll_enabled)
-		return;
-
-	dev->mode_config.poll_enabled = false;
-	cancel_delayed_work_sync(&dev->mode_config.output_poll_work);
+	drm_kms_helper_poll_disable(dev);
 }
 EXPORT_SYMBOL(drm_kms_helper_poll_fini);
 

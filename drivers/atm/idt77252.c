@@ -849,8 +849,6 @@ queue_skb(struct idt77252_dev *card, struct vc_map *vc,
 
 	IDT77252_PRV_PADDR(skb) = dma_map_single(&card->pcidev->dev, skb->data,
 						 skb->len, DMA_TO_DEVICE);
-	if (dma_mapping_error(&card->pcidev->dev, IDT77252_PRV_PADDR(skb)))
-		return -ENOMEM;
 
 	error = -EINVAL;
 
@@ -1120,8 +1118,8 @@ dequeue_rx(struct idt77252_dev *card, struct rsq_entry *rsqe)
 	rpp->len += skb->len;
 
 	if (stat & SAR_RSQE_EPDU) {
-		unsigned int len, truesize;
 		unsigned char *l1l2;
+		unsigned int len;
 
 		l1l2 = (unsigned char *) ((unsigned long) skb->data + skb->len - 6);
 
@@ -1192,15 +1190,14 @@ dequeue_rx(struct idt77252_dev *card, struct rsq_entry *rsqe)
 		ATM_SKB(skb)->vcc = vcc;
 		__net_timestamp(skb);
 
-		truesize = skb->truesize;
 		vcc->push(vcc, skb);
 		atomic_inc(&vcc->stats->rx);
 
-		if (truesize > SAR_FB_SIZE_3)
+		if (skb->truesize > SAR_FB_SIZE_3)
 			add_rx_skb(card, 3, SAR_FB_SIZE_3, 1);
-		else if (truesize > SAR_FB_SIZE_2)
+		else if (skb->truesize > SAR_FB_SIZE_2)
 			add_rx_skb(card, 2, SAR_FB_SIZE_2, 1);
-		else if (truesize > SAR_FB_SIZE_1)
+		else if (skb->truesize > SAR_FB_SIZE_1)
 			add_rx_skb(card, 1, SAR_FB_SIZE_1, 1);
 		else
 			add_rx_skb(card, 0, SAR_FB_SIZE_0, 1);
@@ -1868,8 +1865,6 @@ add_rx_skb(struct idt77252_dev *card, int queue,
 		paddr = dma_map_single(&card->pcidev->dev, skb->data,
 				       skb_end_pointer(skb) - skb->data,
 				       DMA_FROM_DEVICE);
-		if (dma_mapping_error(&card->pcidev->dev, paddr))
-			goto outpoolrm;
 		IDT77252_PRV_PADDR(skb) = paddr;
 
 		if (push_rx_skb(card, skb, queue)) {
@@ -1884,7 +1879,6 @@ outunmap:
 	dma_unmap_single(&card->pcidev->dev, IDT77252_PRV_PADDR(skb),
 			 skb_end_pointer(skb) - skb->data, DMA_FROM_DEVICE);
 
-outpoolrm:
 	handle = IDT77252_PRV_POOL(skb);
 	card->sbpool[POOL_QUEUE(handle)].skb[POOL_INDEX(handle)] = NULL;
 
@@ -2925,7 +2919,6 @@ close_card_oam(struct idt77252_dev *card)
 
 				recycle_rx_pool_skb(card, &vc->rcv.rx_pool);
 			}
-			kfree(vc);
 		}
 	}
 }
@@ -2946,8 +2939,6 @@ open_card_ubr0(struct idt77252_dev *card)
 	vc->scq = alloc_scq(card, vc->class);
 	if (!vc->scq) {
 		printk("%s: can't get SCQ.\n", card->name);
-		kfree(card->vcs[0]);
-		card->vcs[0] = NULL;
 		return -ENOMEM;
 	}
 
@@ -2969,15 +2960,6 @@ open_card_ubr0(struct idt77252_dev *card)
 	clear_bit(VCF_IDLE, &vc->flags);
 	writel(TCMDQ_START | 0, SAR_REG_TCMDQ);
 	return 0;
-}
-
-static void
-close_card_ubr0(struct idt77252_dev *card)
-{
-	struct vc_map *vc = card->vcs[0];
-
-	free_scq(card, vc->scq);
-	kfree(vc);
 }
 
 static int
@@ -3029,7 +3011,6 @@ static void idt77252_dev_close(struct atm_dev *dev)
 	struct idt77252_dev *card = dev->dev_data;
 	u32 conf;
 
-	close_card_ubr0(card);
 	close_card_oam(card);
 
 	conf = SAR_CFG_RXPTH |	/* enable receive path           */
@@ -3634,7 +3615,7 @@ static int idt77252_init_one(struct pci_dev *pcidev,
 
 	if ((err = dma_set_mask_and_coherent(&pcidev->dev, DMA_BIT_MASK(32)))) {
 		printk("idt77252: can't enable DMA for PCI device at %s\n", pci_name(pcidev));
-		goto err_out_disable_pdev;
+		return err;
 	}
 
 	card = kzalloc(sizeof(struct idt77252_dev), GFP_KERNEL);
@@ -3796,7 +3777,6 @@ static void __exit idt77252_exit(void)
 		card = idt77252_chain;
 		dev = card->atmdev;
 		idt77252_chain = card->next;
-		del_timer_sync(&card->tst_timer);
 
 		if (dev->phy->stop)
 			dev->phy->stop(dev);

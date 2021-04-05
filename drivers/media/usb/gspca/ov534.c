@@ -644,11 +644,6 @@ static u8 ov534_reg_read(struct gspca_dev *gspca_dev, u16 reg)
 	if (ret < 0) {
 		pr_err("read failed %d\n", ret);
 		gspca_dev->usb_err = ret;
-		/*
-		 * Make sure the result is zeroed to avoid uninitialized
-		 * values.
-		 */
-		gspca_dev->usb_buf[0] = 0;
 	}
 	return gspca_dev->usb_buf[0];
 }
@@ -798,7 +793,7 @@ static void set_frame_rate(struct gspca_dev *gspca_dev)
 		r = rate_1;
 		i = ARRAY_SIZE(rate_1);
 	}
-	while (--i >= 0) {
+	while (--i > 0) {
 		if (sd->frame_rate >= r->fps)
 			break;
 		r++;

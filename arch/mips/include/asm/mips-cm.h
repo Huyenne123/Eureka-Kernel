@@ -28,7 +28,7 @@ extern void __iomem *mips_cm_l2sync_base;
  * This function returns the physical base address of the Coherence Manager
  * global control block, or 0 if no Coherence Manager is present. It provides
  * a default implementation which reads the CMGCRBase register where available,
- * and may be overriden by platforms which determine this address in a
+ * and may be overridden by platforms which determine this address in a
  * different way by defining a function with the same prototype except for the
  * name mips_cm_phys_base (without underscores).
  */
@@ -47,16 +47,6 @@ extern phys_addr_t __mips_cm_phys_base(void);
  * It's set to 0 for 32-bit accesses and 1 for 64-bit accesses.
  */
 extern int mips_cm_is64;
-
-/*
- * mips_cm_is_l2_hci_broken  - determine if HCI is broken
- *
- * Some CM reports show that Hardware Cache Initialization is
- * complete, but in reality it's not the case. They also incorrectly
- * indicate that Hardware Cache Initialization is supported. This
- * flags allows warning about this broken feature.
- */
-extern bool mips_cm_is_l2_hci_broken;
 
 /**
  * mips_cm_error_report - Report CM cache errors
@@ -95,18 +85,6 @@ static inline bool mips_cm_present(void)
 	return false;
 #endif
 }
-
-/**
- * mips_cm_update_property - update property from the device tree
- *
- * Retrieve the properties from the device tree if a CM node exist and
- * update the internal variable based on this.
- */
-#ifdef CONFIG_MIPS_CM
-extern void mips_cm_update_property(void);
-#else
-static inline void mips_cm_update_property(void) {}
-#endif
 
 /**
  * mips_cm_has_l2sync - determine whether an L2-only sync region is present
@@ -230,6 +208,7 @@ BUILD_CM_RW(l2_config,		MIPS_CM_GCB_OFS + 0x130)
 BUILD_CM_RW(sys_config2,	MIPS_CM_GCB_OFS + 0x150)
 BUILD_CM_RW(l2_pft_control,	MIPS_CM_GCB_OFS + 0x300)
 BUILD_CM_RW(l2_pft_control_b,	MIPS_CM_GCB_OFS + 0x308)
+BUILD_CM_RW(bev_base,		MIPS_CM_GCB_OFS + 0x680)
 
 /* Core Local & Core Other register accessor functions */
 BUILD_CM_Cx_RW(reset_release,	0x00)
@@ -479,7 +458,10 @@ static inline unsigned int mips_cm_max_vp_width(void)
 	if (mips_cm_revision() >= CM_REV_CM3)
 		return read_gcr_sys_config2() & CM_GCR_SYS_CONFIG2_MAXVPW_MSK;
 
-	return smp_num_siblings;
+	if (config_enabled(CONFIG_SMP))
+		return smp_num_siblings;
+
+	return 1;
 }
 
 /**

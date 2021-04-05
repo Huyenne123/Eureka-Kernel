@@ -37,14 +37,6 @@
 #define HIBERNATE_SIG	"S1SUSPEND"
 
 /*
- * When reading an {un,}compressed image, we may restore pages in place,
- * in which case some architectures need these pages cleaning before they
- * can be executed. We don't know which pages these may be, so clean the lot.
- */
-static bool clean_pages_on_read;
-static bool clean_pages_on_decompress;
-
-/*
  *	The swap map is a data structure used for keeping track of each page
  *	written to a swap partition.  It consists of many swap_map_page
  *	structures that contain each an array of MAP_PAGE_ENTRIES swap entries.
@@ -249,9 +241,6 @@ static void hib_end_io(struct bio *bio)
 
 	if (bio_data_dir(bio) == WRITE)
 		put_page(page);
-	else if (clean_pages_on_read)
-		flush_icache_range((unsigned long)page_address(page),
-				   (unsigned long)page_address(page) + PAGE_SIZE);
 
 	if (bio->bi_error && !hb->error)
 		hb->error = bio->bi_error;
@@ -588,11 +577,11 @@ static int crc32_threadfn(void *data)
 	unsigned i;
 
 	while (1) {
-		wait_event(d->go, atomic_read_acquire(&d->ready) ||
+		wait_event(d->go, atomic_read(&d->ready) ||
 		                  kthread_should_stop());
 		if (kthread_should_stop()) {
 			d->thr = NULL;
-			atomic_set_release(&d->stop, 1);
+			atomic_set(&d->stop, 1);
 			wake_up(&d->done);
 			break;
 		}
@@ -601,7 +590,7 @@ static int crc32_threadfn(void *data)
 		for (i = 0; i < d->run_threads; i++)
 			*d->crc32 = crc32_le(*d->crc32,
 			                     d->unc[i], *d->unc_len[i]);
-		atomic_set_release(&d->stop, 1);
+		atomic_set(&d->stop, 1);
 		wake_up(&d->done);
 	}
 	return 0;
@@ -631,12 +620,12 @@ static int lzo_compress_threadfn(void *data)
 	struct cmp_data *d = data;
 
 	while (1) {
-		wait_event(d->go, atomic_read_acquire(&d->ready) ||
+		wait_event(d->go, atomic_read(&d->ready) ||
 		                  kthread_should_stop());
 		if (kthread_should_stop()) {
 			d->thr = NULL;
 			d->ret = -1;
-			atomic_set_release(&d->stop, 1);
+			atomic_set(&d->stop, 1);
 			wake_up(&d->done);
 			break;
 		}
@@ -645,7 +634,7 @@ static int lzo_compress_threadfn(void *data)
 		d->ret = lzo1x_1_compress(d->unc, d->unc_len,
 		                          d->cmp + LZO_HEADER, &d->cmp_len,
 		                          d->wrk);
-		atomic_set_release(&d->stop, 1);
+		atomic_set(&d->stop, 1);
 		wake_up(&d->done);
 	}
 	return 0;
@@ -787,7 +776,7 @@ static int save_image_lzo(struct swap_map_handle *handle,
 
 			data[thr].unc_len = off;
 
-			atomic_set_release(&data[thr].ready, 1);
+			atomic_set(&data[thr].ready, 1);
 			wake_up(&data[thr].go);
 		}
 
@@ -795,12 +784,12 @@ static int save_image_lzo(struct swap_map_handle *handle,
 			break;
 
 		crc->run_threads = thr;
-		atomic_set_release(&crc->ready, 1);
+		atomic_set(&crc->ready, 1);
 		wake_up(&crc->go);
 
 		for (run_threads = thr, thr = 0; thr < run_threads; thr++) {
 			wait_event(data[thr].done,
-				atomic_read_acquire(&data[thr].stop));
+			           atomic_read(&data[thr].stop));
 			atomic_set(&data[thr].stop, 0);
 
 			ret = data[thr].ret;
@@ -840,7 +829,7 @@ static int save_image_lzo(struct swap_map_handle *handle,
 			}
 		}
 
-		wait_event(crc->done, atomic_read_acquire(&crc->stop));
+		wait_event(crc->done, atomic_read(&crc->stop));
 		atomic_set(&crc->stop, 0);
 	}
 
@@ -1060,7 +1049,6 @@ static int load_image(struct swap_map_handle *handle,
 
 	hib_init_batch(&hb);
 
-	clean_pages_on_read = true;
 	printk(KERN_INFO "PM: Loading image data pages (%u pages)...\n",
 		nr_to_read);
 	m = nr_to_read / 10;
@@ -1122,12 +1110,12 @@ static int lzo_decompress_threadfn(void *data)
 	struct dec_data *d = data;
 
 	while (1) {
-		wait_event(d->go, atomic_read_acquire(&d->ready) ||
+		wait_event(d->go, atomic_read(&d->ready) ||
 		                  kthread_should_stop());
 		if (kthread_should_stop()) {
 			d->thr = NULL;
 			d->ret = -1;
-			atomic_set_release(&d->stop, 1);
+			atomic_set(&d->stop, 1);
 			wake_up(&d->done);
 			break;
 		}
@@ -1136,11 +1124,7 @@ static int lzo_decompress_threadfn(void *data)
 		d->unc_len = LZO_UNC_SIZE;
 		d->ret = lzo1x_decompress_safe(d->cmp + LZO_HEADER, d->cmp_len,
 		                               d->unc, &d->unc_len);
-		if (clean_pages_on_decompress)
-			flush_icache_range((unsigned long)d->unc,
-					   (unsigned long)d->unc + d->unc_len);
-
-		atomic_set_release(&d->stop, 1);
+		atomic_set(&d->stop, 1);
 		wake_up(&d->done);
 	}
 	return 0;
@@ -1204,8 +1188,6 @@ static int load_image_lzo(struct swap_map_handle *handle,
 		goto out_clean;
 	}
 	memset(crc, 0, offsetof(struct crc_data, go));
-
-	clean_pages_on_decompress = true;
 
 	/*
 	 * Start the decompression threads.
@@ -1331,7 +1313,7 @@ static int load_image_lzo(struct swap_map_handle *handle,
 		}
 
 		if (crc->run_threads) {
-			wait_event(crc->done, atomic_read_acquire(&crc->stop));
+			wait_event(crc->done, atomic_read(&crc->stop));
 			atomic_set(&crc->stop, 0);
 			crc->run_threads = 0;
 		}
@@ -1368,7 +1350,7 @@ static int load_image_lzo(struct swap_map_handle *handle,
 					pg = 0;
 			}
 
-			atomic_set_release(&data[thr].ready, 1);
+			atomic_set(&data[thr].ready, 1);
 			wake_up(&data[thr].go);
 		}
 
@@ -1387,7 +1369,7 @@ static int load_image_lzo(struct swap_map_handle *handle,
 
 		for (run_threads = thr, thr = 0; thr < run_threads; thr++) {
 			wait_event(data[thr].done,
-				atomic_read_acquire(&data[thr].stop));
+			           atomic_read(&data[thr].stop));
 			atomic_set(&data[thr].stop, 0);
 
 			ret = data[thr].ret;
@@ -1422,7 +1404,7 @@ static int load_image_lzo(struct swap_map_handle *handle,
 				ret = snapshot_write_next(snapshot);
 				if (ret <= 0) {
 					crc->run_threads = thr + 1;
-					atomic_set_release(&crc->ready, 1);
+					atomic_set(&crc->ready, 1);
 					wake_up(&crc->go);
 					goto out_finish;
 				}
@@ -1430,13 +1412,13 @@ static int load_image_lzo(struct swap_map_handle *handle,
 		}
 
 		crc->run_threads = thr;
-		atomic_set_release(&crc->ready, 1);
+		atomic_set(&crc->ready, 1);
 		wake_up(&crc->go);
 	}
 
 out_finish:
 	if (crc->run_threads) {
-		wait_event(crc->done, atomic_read_acquire(&crc->stop));
+		wait_event(crc->done, atomic_read(&crc->stop));
 		atomic_set(&crc->stop, 0);
 	}
 	stop = ktime_get();
@@ -1519,10 +1501,9 @@ end:
 int swsusp_check(void)
 {
 	int error;
-	void *holder;
 
 	hib_resume_bdev = blkdev_get_by_dev(swsusp_resume_device,
-					    FMODE_READ | FMODE_EXCL, &holder);
+					    FMODE_READ, NULL);
 	if (!IS_ERR(hib_resume_bdev)) {
 		set_blocksize(hib_resume_bdev, PAGE_SIZE);
 		clear_page(swsusp_header);
@@ -1542,7 +1523,7 @@ int swsusp_check(void)
 
 put:
 		if (error)
-			blkdev_put(hib_resume_bdev, FMODE_READ | FMODE_EXCL);
+			blkdev_put(hib_resume_bdev, FMODE_READ);
 		else
 			pr_debug("PM: Image signature found, resuming\n");
 	} else {

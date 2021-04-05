@@ -299,7 +299,7 @@ __be32 fib_compute_spec_dst(struct sk_buff *skb)
 			.flowi4_iif = LOOPBACK_IFINDEX,
 			.flowi4_oif = l3mdev_master_ifindex_rcu(dev),
 			.daddr = ip_hdr(skb)->saddr,
-			.flowi4_tos = ip_hdr(skb)->tos & IPTOS_RT_MASK,
+			.flowi4_tos = RT_TOS(ip_hdr(skb)->tos),
 			.flowi4_scope = scope,
 			.flowi4_mark = vmark ? skb->mark : 0,
 		};
@@ -509,7 +509,6 @@ static int rtentry_to_fib_config(struct net *net, int cmd, struct rtentry *rt,
 		if (!dev)
 			return -ENODEV;
 		cfg->fc_oif = dev->ifindex;
-		cfg->fc_table = l3mdev_fib_table(dev);
 		if (colon) {
 			struct in_ifaddr *ifa;
 			struct in_device *in_dev = __in_dev_get_rtnl(dev);
@@ -535,9 +534,6 @@ static int rtentry_to_fib_config(struct net *net, int cmd, struct rtentry *rt,
 		    addr_type == RTN_UNICAST)
 			cfg->fc_scope = RT_SCOPE_UNIVERSE;
 	}
-
-	if (!cfg->fc_table)
-		cfg->fc_table = RT_TABLE_MAIN;
 
 	if (cmd == SIOCDELRT)
 		return 0;
@@ -632,6 +628,7 @@ const struct nla_policy rtm_ipv4_policy[RTA_MAX + 1] = {
 	[RTA_FLOW]		= { .type = NLA_U32 },
 	[RTA_ENCAP_TYPE]	= { .type = NLA_U16 },
 	[RTA_ENCAP]		= { .type = NLA_NESTED },
+	[RTA_UID]		= { .type = NLA_U32 },
 };
 
 static int rtm_to_fib_config(struct net *net, struct sk_buff *skb,
@@ -1038,7 +1035,7 @@ no_promotions:
 			 * First of all, we scan fib_info list searching
 			 * for stray nexthop entries, then ignite fib_flush.
 			 */
-			if (fib_sync_down_addr(dev, ifa->ifa_local))
+			if (fib_sync_down_addr(dev_net(dev), ifa->ifa_local))
 				fib_flush(dev_net(dev));
 		}
 	}
@@ -1055,7 +1052,7 @@ static void nl_fib_lookup(struct net *net, struct fib_result_nl *frn)
 	struct flowi4           fl4 = {
 		.flowi4_mark = frn->fl_mark,
 		.daddr = frn->fl_addr,
-		.flowi4_tos = frn->fl_tos & IPTOS_RT_MASK,
+		.flowi4_tos = frn->fl_tos,
 		.flowi4_scope = frn->fl_scope,
 	};
 	struct fib_table *tb;

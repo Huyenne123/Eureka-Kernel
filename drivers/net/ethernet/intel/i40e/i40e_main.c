@@ -1811,7 +1811,6 @@ bottom_of_search_loop:
 		vsi->flags |= I40E_VSI_FLAG_FILTER_CHANGED;
 		vsi->back->flags |= I40E_FLAG_FILTER_SYNC;
 	}
-	i40e_service_event_schedule(vsi->back);
 }
 
 /**
@@ -2264,10 +2263,6 @@ void i40e_vlan_stripping_enable(struct i40e_vsi *vsi)
 	struct i40e_vsi_context ctxt;
 	i40e_status ret;
 
-	/* Don't modify stripping options if a port VLAN is active */
-	if (vsi->info.pvid)
-		return;
-
 	if ((vsi->info.valid_sections &
 	     cpu_to_le16(I40E_AQ_VSI_PROP_VLAN_VALID)) &&
 	    ((vsi->info.port_vlan_flags & I40E_AQ_VSI_PVLAN_MODE_MASK) == 0))
@@ -2297,10 +2292,6 @@ void i40e_vlan_stripping_disable(struct i40e_vsi *vsi)
 {
 	struct i40e_vsi_context ctxt;
 	i40e_status ret;
-
-	/* Don't modify stripping options if a port VLAN is active */
-	if (vsi->info.pvid)
-		return;
 
 	if ((vsi->info.valid_sections &
 	     cpu_to_le16(I40E_AQ_VSI_PROP_VLAN_VALID)) &&
@@ -3375,7 +3366,7 @@ free_queue_irqs:
 		irq_set_affinity_hint(pf->msix_entries[base + vector].vector,
 				      NULL);
 		free_irq(pf->msix_entries[base + vector].vector,
-			 vsi->q_vectors[vector]);
+			 &(vsi->q_vectors[vector]));
 	}
 	return err;
 }
@@ -4357,7 +4348,7 @@ static int i40e_pf_wait_txq_disabled(struct i40e_pf *pf)
 {
 	int v, ret = 0;
 
-	for (v = 0; v < pf->num_alloc_vsi; v++) {
+	for (v = 0; v < pf->hw.func_caps.num_vsis; v++) {
 		/* No need to wait for FCoE VSI queues */
 		if (pf->vsi[v] && pf->vsi[v]->type != I40E_VSI_FCOE) {
 			ret = i40e_vsi_wait_txq_disabled(pf->vsi[v]);
@@ -5362,27 +5353,6 @@ int i40e_open(struct net_device *netdev)
 }
 
 /**
- * i40e_netif_set_realnum_tx_rx_queues - Update number of tx/rx queues
- * @vsi: vsi structure
- *
- * This updates netdev's number of tx/rx queues
- *
- * Returns status of setting tx/rx queues
- **/
-static int i40e_netif_set_realnum_tx_rx_queues(struct i40e_vsi *vsi)
-{
-	int ret;
-
-	ret = netif_set_real_num_rx_queues(vsi->netdev,
-					   vsi->num_queue_pairs);
-	if (ret)
-		return ret;
-
-	return netif_set_real_num_tx_queues(vsi->netdev,
-					    vsi->num_queue_pairs);
-}
-
-/**
  * i40e_vsi_open -
  * @vsi: the VSI to open
  *
@@ -5416,7 +5386,13 @@ int i40e_vsi_open(struct i40e_vsi *vsi)
 			goto err_setup_rx;
 
 		/* Notify the stack of the actual queue counts. */
-		err = i40e_netif_set_realnum_tx_rx_queues(vsi);
+		err = netif_set_real_num_tx_queues(vsi->netdev,
+						   vsi->num_queue_pairs);
+		if (err)
+			goto err_set_queues;
+
+		err = netif_set_real_num_rx_queues(vsi->netdev,
+						   vsi->num_queue_pairs);
 		if (err)
 			goto err_set_queues;
 
@@ -5425,8 +5401,6 @@ int i40e_vsi_open(struct i40e_vsi *vsi)
 			 dev_driver_string(&pf->pdev->dev),
 			 dev_name(&pf->pdev->dev));
 		err = i40e_vsi_request_irq(vsi, int_name);
-		if (err)
-			goto err_setup_rx;
 
 	} else {
 		err = -EINVAL;
@@ -6590,7 +6564,7 @@ static int i40e_get_capabilities(struct i40e_pf *pf)
 		if (pf->hw.aq.asq_last_status == I40E_AQ_RC_ENOMEM) {
 			/* retry with a larger buffer */
 			buf_len = data_size;
-		} else if (pf->hw.aq.asq_last_status != I40E_AQ_RC_OK || err) {
+		} else if (pf->hw.aq.asq_last_status != I40E_AQ_RC_OK) {
 			dev_info(&pf->pdev->dev,
 				 "capability discovery failed, err %s aq_err %s\n",
 				 i40e_stat_str(&pf->hw, err),
@@ -6918,11 +6892,8 @@ static void i40e_reset_and_rebuild(struct i40e_pf *pf, bool reinit)
 					     pf->hw.aq.asq_last_status));
 	}
 	/* reinit the misc interrupt */
-	if (pf->flags & I40E_FLAG_MSIX_ENABLED) {
+	if (pf->flags & I40E_FLAG_MSIX_ENABLED)
 		ret = i40e_setup_misc_vector(pf);
-		if (ret)
-			goto end_core_reset;
-	}
 
 	/* Add a filter to drop all Flow control frames from any VSI from being
 	 * transmitted. By doing so we stop a malicious VF from sending out
@@ -8169,7 +8140,6 @@ static int i40e_sw_init(struct i40e_pf *pf)
 {
 	int err = 0;
 	int size;
-	u16 pow;
 
 	pf->msg_enable = netif_msg_init(I40E_DEFAULT_MSG_ENABLE,
 				(NETIF_MSG_DRV|NETIF_MSG_PROBE|NETIF_MSG_LINK));
@@ -8204,11 +8174,6 @@ static int i40e_sw_init(struct i40e_pf *pf)
 	pf->rss_table_size = pf->hw.func_caps.rss_table_size;
 	pf->rss_size_max = min_t(int, pf->rss_size_max,
 				 pf->hw.func_caps.num_tx_qp);
-
-	/* find the next higher power-of-2 of num cpus */
-	pow = roundup_pow_of_two(num_online_cpus());
-	pf->rss_size_max = min_t(int, pf->rss_size_max, pow);
-
 	if (pf->hw.func_caps.rss) {
 		pf->flags |= I40E_FLAG_RSS_ENABLED;
 		pf->rss_size = min_t(int, pf->rss_size_max, num_online_cpus());
@@ -8561,8 +8526,6 @@ static int i40e_ndo_bridge_setlink(struct net_device *dev,
 	}
 
 	br_spec = nlmsg_find_attr(nlh, sizeof(struct ifinfomsg), IFLA_AF_SPEC);
-	if (!br_spec)
-		return -EINVAL;
 
 	nla_for_each_nested(attr, br_spec, rem) {
 		__u16 mode;
@@ -9434,9 +9397,6 @@ struct i40e_vsi *i40e_vsi_setup(struct i40e_pf *pf, u8 type,
 	case I40E_VSI_VMDQ2:
 	case I40E_VSI_FCOE:
 		ret = i40e_config_netdev(vsi);
-		if (ret)
-			goto err_netdev;
-		ret = i40e_netif_set_realnum_tx_rx_queues(vsi);
 		if (ret)
 			goto err_netdev;
 		ret = register_netdev(vsi->netdev);
@@ -10833,15 +10793,11 @@ static void i40e_remove(struct pci_dev *pdev)
 			i40e_switch_branch_release(pf->veb[i]);
 	}
 
-	/* Now we can shutdown the PF's VSIs, just before we kill
+	/* Now we can shutdown the PF's VSI, just before we kill
 	 * adminq and hmc.
 	 */
-	for (i = pf->num_alloc_vsi; i--;)
-		if (pf->vsi[i]) {
-			i40e_vsi_close(pf->vsi[i]);
-			i40e_vsi_release(pf->vsi[i]);
-			pf->vsi[i] = NULL;
-		}
+	if (pf->vsi[pf->lan_vsi])
+		i40e_vsi_release(pf->vsi[pf->lan_vsi]);
 
 	/* shutdown and destroy the HMC */
 	if (pf->hw.hmc.hmc_obj) {
@@ -10864,7 +10820,6 @@ static void i40e_remove(struct pci_dev *pdev)
 	mutex_destroy(&hw->aq.asq_mutex);
 
 	/* Clear all dynamic memory lists of rings, q_vectors, and VSIs */
-	rtnl_lock();
 	i40e_clear_interrupt_scheme(pf);
 	for (i = 0; i < pf->num_alloc_vsi; i++) {
 		if (pf->vsi[i]) {
@@ -10873,7 +10828,6 @@ static void i40e_remove(struct pci_dev *pdev)
 			pf->vsi[i] = NULL;
 		}
 	}
-	rtnl_unlock();
 
 	for (i = 0; i < I40E_MAX_VEB; i++) {
 		kfree(pf->veb[i]);
@@ -11020,13 +10974,7 @@ static void i40e_shutdown(struct pci_dev *pdev)
 	wr32(hw, I40E_PFPM_WUFC,
 	     (pf->wol_en ? I40E_PFPM_WUFC_MAG_MASK : 0));
 
-	/* Since we're going to destroy queues during the
-	 * i40e_clear_interrupt_scheme() we should hold the RTNL lock for this
-	 * whole section
-	 */
-	rtnl_lock();
 	i40e_clear_interrupt_scheme(pf);
-	rtnl_unlock();
 
 	if (system_state == SYSTEM_POWER_OFF) {
 		pci_wake_from_d3(pdev, pf->wol_en);

@@ -116,7 +116,6 @@ asmlinkage __visible void cpu_bringup_and_idle(int cpu)
 #endif
 	cpu_bringup();
 	cpu_startup_entry(CPUHP_ONLINE);
-	prevent_tail_call_optimization();
 }
 
 static void xen_smp_intr_free(unsigned int cpu)
@@ -169,8 +168,6 @@ static int xen_smp_intr_init(unsigned int cpu)
 	char *resched_name, *callfunc_name, *debug_name, *pmu_name;
 
 	resched_name = kasprintf(GFP_KERNEL, "resched%d", cpu);
-	if (!resched_name)
-		goto fail_mem;
 	rc = bind_ipi_to_irqhandler(XEN_RESCHEDULE_VECTOR,
 				    cpu,
 				    xen_reschedule_interrupt,
@@ -183,8 +180,6 @@ static int xen_smp_intr_init(unsigned int cpu)
 	per_cpu(xen_resched_irq, cpu).name = resched_name;
 
 	callfunc_name = kasprintf(GFP_KERNEL, "callfunc%d", cpu);
-	if (!callfunc_name)
-		goto fail_mem;
 	rc = bind_ipi_to_irqhandler(XEN_CALL_FUNCTION_VECTOR,
 				    cpu,
 				    xen_call_function_interrupt,
@@ -206,8 +201,6 @@ static int xen_smp_intr_init(unsigned int cpu)
 	per_cpu(xen_debug_irq, cpu).name = debug_name;
 
 	callfunc_name = kasprintf(GFP_KERNEL, "callfuncsingle%d", cpu);
-	if (!callfunc_name)
-		goto fail_mem;
 	rc = bind_ipi_to_irqhandler(XEN_CALL_FUNCTION_SINGLE_VECTOR,
 				    cpu,
 				    xen_call_function_single_interrupt,
@@ -252,8 +245,6 @@ static int xen_smp_intr_init(unsigned int cpu)
 
 	return 0;
 
- fail_mem:
-	rc = -ENOMEM;
  fail:
 	xen_smp_intr_free(cpu);
 	return rc;

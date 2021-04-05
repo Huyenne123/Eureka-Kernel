@@ -141,10 +141,9 @@ static int __of_iio_channel_get(struct iio_channel *channel,
 
 	idev = bus_find_device(&iio_bus_type, NULL, iiospec.np,
 			       iio_dev_node_match);
-	if (idev == NULL) {
-		of_node_put(iiospec.np);
+	of_node_put(iiospec.np);
+	if (idev == NULL)
 		return -EPROBE_DEFER;
-	}
 
 	indio_dev = dev_to_iio_dev(idev);
 	channel->indio_dev = indio_dev;
@@ -152,7 +151,6 @@ static int __of_iio_channel_get(struct iio_channel *channel,
 		index = indio_dev->info->of_xlate(indio_dev, &iiospec);
 	else
 		index = __of_iio_simple_xlate(indio_dev, &iiospec);
-	of_node_put(iiospec.np);
 	if (index < 0)
 		goto err_put;
 	channel->channel = &indio_dev->channels[index];
@@ -423,7 +421,7 @@ struct iio_channel *iio_channel_get_all(struct device *dev)
 	return chans;
 
 error_free_chans:
-	for (i = 0; i < mapind; i++)
+	for (i = 0; i < nummaps; i++)
 		iio_device_put(chans[i].indio_dev);
 	kfree(chans);
 error_ret:
@@ -511,35 +509,13 @@ EXPORT_SYMBOL_GPL(iio_read_channel_average_raw);
 static int iio_convert_raw_to_processed_unlocked(struct iio_channel *chan,
 	int raw, int *processed, unsigned int scale)
 {
-	int scale_type, scale_val, scale_val2;
-	int offset_type, offset_val, offset_val2;
+	int scale_type, scale_val, scale_val2, offset;
 	s64 raw64 = raw;
+	int ret;
 
-	offset_type = iio_channel_read(chan, &offset_val, &offset_val2,
-				       IIO_CHAN_INFO_OFFSET);
-	if (offset_type >= 0) {
-		switch (offset_type) {
-		case IIO_VAL_INT:
-			break;
-		case IIO_VAL_INT_PLUS_MICRO:
-		case IIO_VAL_INT_PLUS_NANO:
-			/*
-			 * Both IIO_VAL_INT_PLUS_MICRO and IIO_VAL_INT_PLUS_NANO
-			 * implicitely truncate the offset to it's integer form.
-			 */
-			break;
-		case IIO_VAL_FRACTIONAL:
-			offset_val /= offset_val2;
-			break;
-		case IIO_VAL_FRACTIONAL_LOG2:
-			offset_val >>= offset_val2;
-			break;
-		default:
-			return -EINVAL;
-		}
-
-		raw64 += offset_val;
-	}
+	ret = iio_channel_read(chan, &offset, NULL, IIO_CHAN_INFO_OFFSET);
+	if (ret >= 0)
+		raw64 += offset;
 
 	scale_type = iio_channel_read(chan, &scale_val, &scale_val2,
 					IIO_CHAN_INFO_SCALE);
@@ -548,21 +524,21 @@ static int iio_convert_raw_to_processed_unlocked(struct iio_channel *chan,
 
 	switch (scale_type) {
 	case IIO_VAL_INT:
-		*processed = raw64 * scale_val * scale;
+		*processed = raw64 * scale_val;
 		break;
 	case IIO_VAL_INT_PLUS_MICRO:
 		if (scale_val2 < 0)
-			*processed = -raw64 * scale_val * scale;
+			*processed = -raw64 * scale_val;
 		else
-			*processed = raw64 * scale_val * scale;
+			*processed = raw64 * scale_val;
 		*processed += div_s64(raw64 * (s64)scale_val2 * scale,
 				      1000000LL);
 		break;
 	case IIO_VAL_INT_PLUS_NANO:
 		if (scale_val2 < 0)
-			*processed = -raw64 * scale_val * scale;
+			*processed = -raw64 * scale_val;
 		else
-			*processed = raw64 * scale_val * scale;
+			*processed = raw64 * scale_val;
 		*processed += div_s64(raw64 * (s64)scale_val2 * scale,
 				      1000000000LL);
 		break;

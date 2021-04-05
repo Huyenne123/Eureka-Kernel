@@ -52,7 +52,7 @@ static int sr_read_reg(struct usbnet *dev, u8 reg, u8 *value)
 
 static int sr_write_reg(struct usbnet *dev, u8 reg, u8 value)
 {
-	return usbnet_write_cmd(dev, SR_WR_REG, SR_REQ_WR_REG,
+	return usbnet_write_cmd(dev, SR_WR_REGS, SR_REQ_WR_REG,
 				value, reg, NULL, 0);
 }
 
@@ -64,7 +64,7 @@ static void sr_write_async(struct usbnet *dev, u8 reg, u16 length, void *data)
 
 static void sr_write_reg_async(struct usbnet *dev, u8 reg, u8 value)
 {
-	usbnet_write_cmd_async(dev, SR_WR_REG, SR_REQ_WR_REG,
+	usbnet_write_cmd_async(dev, SR_WR_REGS, SR_REQ_WR_REG,
 			       value, reg, NULL, 0);
 }
 
@@ -178,7 +178,6 @@ static int sr_mdio_read(struct net_device *netdev, int phy_id, int loc)
 	struct usbnet *dev = netdev_priv(netdev);
 	__le16 res;
 	int rc = 0;
-	int err;
 
 	if (phy_id) {
 		netdev_dbg(netdev, "Only internal phy supported\n");
@@ -189,17 +188,11 @@ static int sr_mdio_read(struct net_device *netdev, int phy_id, int loc)
 	if (loc == MII_BMSR) {
 		u8 value;
 
-		err = sr_read_reg(dev, SR_NSR, &value);
-		if (err < 0)
-			return err;
-
+		sr_read_reg(dev, SR_NSR, &value);
 		if (value & NSR_LINKST)
 			rc = 1;
 	}
-	err = sr_share_read_word(dev, 1, loc, &res);
-	if (err < 0)
-		return err;
-
+	sr_share_read_word(dev, 1, loc, &res);
 	if (rc == 1)
 		res = le16_to_cpu(res) | BMSR_LSTATUS;
 	else
@@ -416,7 +409,7 @@ static int sr9700_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 		/* ignore the CRC length */
 		len = (skb->data[1] | (skb->data[2] << 8)) - 4;
 
-		if (len > ETH_FRAME_LEN || len > skb->len || len < 0)
+		if (len > ETH_FRAME_LEN)
 			return 0;
 
 		/* the last packet of current skb */
@@ -424,15 +417,19 @@ static int sr9700_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 			skb_pull(skb, 3);
 			skb->len = len;
 			skb_set_tail_pointer(skb, len);
+			skb->truesize = len + sizeof(struct sk_buff);
 			return 2;
 		}
 
-		sr_skb = netdev_alloc_skb_ip_align(dev->net, len);
+		/* skb_clone is used for address align */
+		sr_skb = skb_clone(skb, GFP_ATOMIC);
 		if (!sr_skb)
 			return 0;
 
-		skb_put(sr_skb, len);
-		memcpy(sr_skb->data, skb->data + 3, len);
+		sr_skb->len = len;
+		sr_skb->data = skb->data + 3;
+		skb_set_tail_pointer(sr_skb, len);
+		sr_skb->truesize = len + sizeof(struct sk_buff);
 		usbnet_skb_return(dev, sr_skb);
 
 		skb_pull(skb, len + SR_RX_OVERHEAD);
@@ -533,11 +530,6 @@ static const struct driver_info sr9700_driver_info = {
 static const struct usb_device_id products[] = {
 	{
 		USB_DEVICE(0x0fe6, 0x9700),	/* SR9700 device */
-		.driver_info = (unsigned long)&sr9700_driver_info,
-	},
-	{
-		/* SR9700 with virtual driver CD-ROM - interface 0 is the CD-ROM device */
-		USB_DEVICE_INTERFACE_NUMBER(0x0fe6, 0x9702, 1),
 		.driver_info = (unsigned long)&sr9700_driver_info,
 	},
 	{},			/* END */

@@ -328,7 +328,7 @@ EXPORT_SYMBOL(memstick_init_req);
 static int h_memstick_read_dev_id(struct memstick_dev *card,
 				  struct memstick_request **mrq)
 {
-	struct ms_id_register id_reg = {};
+	struct ms_id_register id_reg;
 
 	if (!(*mrq)) {
 		memstick_init_req(&card->current_mrq, MS_TPC_READ_REG, NULL,
@@ -373,9 +373,7 @@ int memstick_set_rw_addr(struct memstick_dev *card)
 {
 	card->next_request = h_memstick_set_rw_addr;
 	memstick_new_req(card->host);
-	if (!wait_for_completion_timeout(&card->mrq_complete,
-			msecs_to_jiffies(500)))
-		card->current_mrq.error = -ETIMEDOUT;
+	wait_for_completion(&card->mrq_complete);
 
 	return card->current_mrq.error;
 }
@@ -409,9 +407,7 @@ static struct memstick_dev *memstick_alloc_card(struct memstick_host *host)
 
 		card->next_request = h_memstick_read_dev_id;
 		memstick_new_req(host);
-		if (!wait_for_completion_timeout(&card->mrq_complete,
-				msecs_to_jiffies(500)))
-			card->current_mrq.error = -ETIMEDOUT;
+		wait_for_completion(&card->mrq_complete);
 
 		if (card->current_mrq.error)
 			goto err_out;
@@ -420,7 +416,6 @@ static struct memstick_dev *memstick_alloc_card(struct memstick_host *host)
 	return card;
 err_out:
 	host->card = old_card;
-	kfree_const(card->dev.kobj.name);
 	kfree(card);
 	return NULL;
 }
@@ -474,12 +469,11 @@ static void memstick_check(struct work_struct *work)
 			host->card = card;
 			if (device_register(&card->dev)) {
 				put_device(&card->dev);
+				kfree(host->card);
 				host->card = NULL;
 			}
-		} else {
-			kfree_const(card->dev.kobj.name);
+		} else
 			kfree(card);
-		}
 	}
 
 out_power_off:
@@ -635,18 +629,13 @@ static int __init memstick_init(void)
 		return -ENOMEM;
 
 	rc = bus_register(&memstick_bus_type);
-	if (rc)
-		goto error_destroy_workqueue;
+	if (!rc)
+		rc = class_register(&memstick_host_class);
 
-	rc = class_register(&memstick_host_class);
-	if (rc)
-		goto error_bus_unregister;
+	if (!rc)
+		return 0;
 
-	return 0;
-
-error_bus_unregister:
 	bus_unregister(&memstick_bus_type);
-error_destroy_workqueue:
 	destroy_workqueue(workqueue);
 
 	return rc;

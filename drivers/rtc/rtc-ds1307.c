@@ -940,8 +940,10 @@ static int ds1307_probe(struct i2c_client *client,
 		i2c_smbus_write_byte_data(client, DS1337_REG_CONTROL,
 							ds1307->regs[0]);
 
-		/* oscillator fault? warn */
+		/* oscillator fault?  clear flag, and warn */
 		if (ds1307->regs[1] & DS1337_BIT_OSF) {
+			i2c_smbus_write_byte_data(client, DS1337_REG_STATUS,
+				ds1307->regs[1] & ~DS1337_BIT_OSF);
 			dev_warn(&client->dev, "SET TIME!\n");
 		}
 		break;

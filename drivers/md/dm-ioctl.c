@@ -16,7 +16,6 @@
 #include <linux/dm-ioctl.h>
 #include <linux/hdreg.h>
 #include <linux/compat.h>
-#include <linux/nospec.h>
 
 #include <asm/uaccess.h>
 
@@ -525,7 +524,7 @@ static int list_devices(struct dm_ioctl *param, size_t param_size)
 	 * Grab our output buffer.
 	 */
 	nl = get_result_buffer(param, param_size, &len);
-	if (len < needed || len < sizeof(nl->dev)) {
+	if (len < needed) {
 		param->flags |= DM_BUFFER_FULL_FLAG;
 		goto out;
 	}
@@ -561,7 +560,7 @@ static void list_version_get_needed(struct target_type *tt, void *needed_param)
     size_t *needed = needed_param;
 
     *needed += sizeof(struct dm_target_versions);
-    *needed += strlen(tt->name) + 1;
+    *needed += strlen(tt->name);
     *needed += ALIGN_MASK;
 }
 
@@ -616,7 +615,7 @@ static int list_versions(struct dm_ioctl *param, size_t param_size)
 	iter_info.old_vers = NULL;
 	iter_info.vers = vers;
 	iter_info.flags = 0;
-	iter_info.end = (char *)vers + needed;
+	iter_info.end = (char *)vers+len;
 
 	/*
 	 * Now loop through filling out the names & versions.
@@ -1027,26 +1026,8 @@ static int do_resume(struct dm_ioctl *param)
 			suspend_flags &= ~DM_SUSPEND_LOCKFS_FLAG;
 		if (param->flags & DM_NOFLUSH_FLAG)
 			suspend_flags |= DM_SUSPEND_NOFLUSH_FLAG;
-		if (!dm_suspended_md(md)) {
-			r = dm_suspend(md, suspend_flags);
-			if (r) {
-				down_write(&_hash_lock);
-				hc = dm_get_mdptr(md);
-				if (hc && !hc->new_map) {
-					hc->new_map = new_map;
-					new_map = NULL;
-				} else {
-					r = -ENXIO;
-				}
-				up_write(&_hash_lock);
-				if (new_map) {
-					dm_sync_table(md);
-					dm_table_destroy(new_map);
-				}
-				dm_put(md);
-				return r;
-			}
-		}
+		if (!dm_suspended_md(md))
+			dm_suspend(md, suspend_flags);
 
 		old_map = dm_swap_table(md, new_map);
 		if (IS_ERR(old_map)) {
@@ -1392,12 +1373,11 @@ static int table_clear(struct dm_ioctl *param, size_t param_size)
 		hc->new_map = NULL;
 	}
 
+	param->flags &= ~DM_INACTIVE_PRESENT_FLAG;
+
+	__dev_status(hc->md, param);
 	md = hc->md;
 	up_write(&_hash_lock);
-
-	param->flags &= ~DM_INACTIVE_PRESENT_FLAG;
-	__dev_status(md, param);
-
 	if (old_map) {
 		dm_sync_table(md);
 		dm_table_destroy(old_map);
@@ -1559,7 +1539,6 @@ static int target_message(struct dm_ioctl *param, size_t param_size)
 
 	if (!argc) {
 		DMWARN("Empty message received.");
-		r = -EINVAL;
 		goto out_argv;
 	}
 
@@ -1652,7 +1631,6 @@ static ioctl_fn lookup_ioctl(unsigned int cmd, int *ioctl_flags)
 	if (unlikely(cmd >= ARRAY_SIZE(_ioctls)))
 		return NULL;
 
-	cmd = array_index_nospec(cmd, ARRAY_SIZE(_ioctls));
 	*ioctl_flags = _ioctls[cmd].flags;
 	return _ioctls[cmd].fn;
 }
@@ -1691,8 +1669,7 @@ static int check_version(unsigned int cmd, struct dm_ioctl __user *user)
 	return r;
 }
 
-#define DM_PARAMS_KMALLOC	0x0001	/* Params alloced with kmalloc */
-#define DM_PARAMS_VMALLOC	0x0002	/* Params alloced with vmalloc */
+#define DM_PARAMS_MALLOC	0x0001	/* Params allocated with kvmalloc() */
 #define DM_WIPE_BUFFER		0x0010	/* Wipe input buffer before returning from ioctl */
 
 static void free_params(struct dm_ioctl *param, size_t param_size, int param_flags)
@@ -1700,10 +1677,8 @@ static void free_params(struct dm_ioctl *param, size_t param_size, int param_fla
 	if (param_flags & DM_WIPE_BUFFER)
 		memset(param, 0, param_size);
 
-	if (param_flags & DM_PARAMS_KMALLOC)
-		kfree(param);
-	if (param_flags & DM_PARAMS_VMALLOC)
-		vfree(param);
+	if (param_flags & DM_PARAMS_MALLOC)
+		kvfree(param);
 }
 
 static int copy_params(struct dm_ioctl __user *user, struct dm_ioctl *param_kernel,
@@ -1734,19 +1709,14 @@ static int copy_params(struct dm_ioctl __user *user, struct dm_ioctl *param_kern
 	 * Use kmalloc() rather than vmalloc() when we can.
 	 */
 	dmi = NULL;
-	if (param_kernel->data_size <= KMALLOC_MAX_SIZE) {
+	if (param_kernel->data_size <= KMALLOC_MAX_SIZE)
 		dmi = kmalloc(param_kernel->data_size, GFP_NOIO | __GFP_NORETRY | __GFP_NOMEMALLOC | __GFP_NOWARN);
-		if (dmi)
-			*param_flags |= DM_PARAMS_KMALLOC;
-	}
 
 	if (!dmi) {
 		unsigned noio_flag;
 		noio_flag = memalloc_noio_save();
 		dmi = __vmalloc(param_kernel->data_size, GFP_NOIO | __GFP_REPEAT | __GFP_HIGH | __GFP_HIGHMEM, PAGE_KERNEL);
 		memalloc_noio_restore(noio_flag);
-		if (dmi)
-			*param_flags |= DM_PARAMS_VMALLOC;
 	}
 
 	if (!dmi) {
@@ -1754,7 +1724,9 @@ static int copy_params(struct dm_ioctl __user *user, struct dm_ioctl *param_kern
 			return -EFAULT;
 		return -ENOMEM;
 	}
-
+	
+	*param_flags |= DM_PARAMS_MALLOC;
+	
 	/* Copy from param_kernel (which was already copied from user) */
 	memcpy(dmi, param_kernel, minimum_data_size);
 
@@ -1939,6 +1911,45 @@ void dm_interface_exit(void)
 	dm_hash_exit();
 }
 
+
+/**
+ * dm_ioctl_export - Permanently export a mapped device via the ioctl interface
+ * @md: Pointer to mapped_device
+ * @name: Buffer (size DM_NAME_LEN) for name
+ * @uuid: Buffer (size DM_UUID_LEN) for uuid or NULL if not desired
+ */
+int dm_ioctl_export(struct mapped_device *md, const char *name,
+		    const char *uuid)
+{
+	int r = 0;
+	struct hash_cell *hc;
+
+	if (!md) {
+		r = -ENXIO;
+		goto out;
+	}
+
+	/* The name and uuid can only be set once. */
+	mutex_lock(&dm_hash_cells_mutex);
+	hc = dm_get_mdptr(md);
+	mutex_unlock(&dm_hash_cells_mutex);
+	if (hc) {
+		DMERR("%s: already exported", dm_device_name(md));
+		r = -ENXIO;
+		goto out;
+	}
+
+	r = dm_hash_insert(name, uuid, md);
+	if (r) {
+		DMERR("%s: could not bind to '%s'", dm_device_name(md), name);
+		goto out;
+	}
+
+	/* Let udev know we've changed. */
+	dm_kobject_uevent(md, KOBJ_CHANGE, dm_get_event_nr(md));
+out:
+	return r;
+}
 /**
  * dm_copy_name_and_uuid - Copy mapped device name & uuid into supplied buffers
  * @md: Pointer to mapped_device

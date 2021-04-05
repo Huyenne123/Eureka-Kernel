@@ -231,17 +231,6 @@ config ARM_TEGRA124_CPUFREQ
 	help
 	  This adds the CPUFreq driver support for Tegra124 SOCs.
 
-config ARM_TI_CPUFREQ
-	bool "Texas Instruments CPUFreq support"
-	depends on ARCH_OMAP2PLUS
-	help
-	  This driver enables valid OPPs on the running platform based on
-	  values contained within the SoC in use. Enable this in order to
-	  use the cpufreq-dt driver on all Texas Instruments platforms that
-	  provide dt based operating-points-v2 tables with opp-supported-hw
-	  data provided. Required for cpufreq support on AM335x, AM437x,
-	  DRA7x, and AM57x platforms.
-
 config ARM_PXA2xx_CPUFREQ
 	tristate "Intel PXA2xx CPUfreq driver"
 	depends on PXA27x || PXA25x
@@ -264,5 +253,23 @@ config ACPI_CPPC_CPUFREQ
 	  processor to flexibly optimize for power and
 	  performance. CPPC relies on power management firmware
 	  support for its operation.
+
+	  If in doubt, say N.
+
+config ARM_EXYNOS_ACME
+	bool "SAMSUNG EXYNOS ACME(A Cpufreq that Meets Every chipset) driver"
+	depends on ARCH_EXYNOS
+	  help
+	  This adds the CPUFreq driver for every exynos chipset. Exynos
+	  ACME supported SoC must use the exynos CAL framework.
+
+	  If in doubt, say N.
+
+config ARM_EXYNOS_UFC
+	bool "SAMSUNG EXYNOS UFC(User Frequency Control) driver"
+	depends on ARM_EXYNOS_ACME
+	  help
+	  This adds the User CPU Frequency Control driver for every exynos chipset.
+	  Exynos UFC suppored SoC must use the exynos ACME driver.
 
 	  If in doubt, say N.

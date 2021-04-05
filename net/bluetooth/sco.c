@@ -83,6 +83,7 @@ static void sco_sock_timeout(unsigned long arg)
 	sk->sk_state_change(sk);
 	bh_unlock_sock(sk);
 
+	sco_sock_kill(sk);
 	sock_put(sk);
 }
 
@@ -174,6 +175,7 @@ static void sco_conn_del(struct hci_conn *hcon, int err)
 		sco_sock_clear_timer(sk);
 		sco_chan_del(sk, err);
 		bh_unlock_sock(sk);
+		sco_sock_kill(sk);
 		sock_put(sk);
 	}
 
@@ -269,8 +271,7 @@ done:
 	return err;
 }
 
-static int sco_send_frame(struct sock *sk, void *buf, int len,
-			  unsigned int msg_flags)
+static int sco_send_frame(struct sock *sk, struct msghdr *msg, int len)
 {
 	struct sco_conn *conn = sco_pi(sk)->conn;
 	struct sk_buff *skb;
@@ -282,11 +283,15 @@ static int sco_send_frame(struct sock *sk, void *buf, int len,
 
 	BT_DBG("sk %p len %d", sk, len);
 
-	skb = bt_skb_send_alloc(sk, len, msg_flags & MSG_DONTWAIT, &err);
+	skb = bt_skb_send_alloc(sk, len, msg->msg_flags & MSG_DONTWAIT, &err);
 	if (!skb)
 		return err;
 
-	memcpy(skb_put(skb, len), buf, len);
+	if (memcpy_from_msg(skb_put(skb, len), msg, len)) {
+		kfree_skb(skb);
+		return -EFAULT;
+	}
+
 	hci_send_sco(conn->hcon, skb);
 
 	return len;
@@ -387,17 +392,11 @@ static void sco_sock_cleanup_listen(struct sock *parent)
  */
 static void sco_sock_kill(struct sock *sk)
 {
-	if (!sock_flag(sk, SOCK_ZAPPED) || sk->sk_socket)
+	if (!sock_flag(sk, SOCK_ZAPPED) || sk->sk_socket ||
+	    sock_flag(sk, SOCK_DEAD))
 		return;
 
 	BT_DBG("sk %p state %d", sk, sk->sk_state);
-
-	/* Sock is dead, so set conn->sk to NULL to avoid possible UAF */
-	if (sco_pi(sk)->conn) {
-		sco_conn_lock(sco_pi(sk)->conn);
-		sco_pi(sk)->conn->sk = NULL;
-		sco_conn_unlock(sco_pi(sk)->conn);
-	}
 
 	/* Kill poor orphan */
 	bt_sock_unlink(&sco_sk_list, sk);
@@ -446,6 +445,7 @@ static void sco_sock_close(struct sock *sk)
 	lock_sock(sk);
 	__sco_sock_close(sk);
 	release_sock(sk);
+	sco_sock_kill(sk);
 }
 
 static void sco_sock_init(struct sock *sk, struct sock *parent)
@@ -704,7 +704,6 @@ static int sco_sock_sendmsg(struct socket *sock, struct msghdr *msg,
 			    size_t len)
 {
 	struct sock *sk = sock->sk;
-	void *buf;
 	int err;
 
 	BT_DBG("sock %p, sk %p", sock, sk);
@@ -716,24 +715,14 @@ static int sco_sock_sendmsg(struct socket *sock, struct msghdr *msg,
 	if (msg->msg_flags & MSG_OOB)
 		return -EOPNOTSUPP;
 
-	buf = kmalloc(len, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	if (memcpy_from_msg(buf, msg, len)) {
-		kfree(buf);
-		return -EFAULT;
-	}
-
 	lock_sock(sk);
 
 	if (sk->sk_state == BT_CONNECTED)
-		err = sco_send_frame(sk, buf, len, msg->msg_flags);
+		err = sco_send_frame(sk, msg, len);
 	else
 		err = -ENOTCONN;
 
 	release_sock(sk);
-	kfree(buf);
 	return err;
 }
 
@@ -771,11 +760,6 @@ static void sco_conn_defer_accept(struct hci_conn *conn, u16 setting)
 			cp.retrans_effort = 0x02;
 			break;
 		case SCO_AIRMODE_CVSD:
-			cp.max_latency = cpu_to_le16(0xffff);
-			cp.retrans_effort = 0xff;
-			break;
-		default:
-			/* use CVSD settings as fallback */
 			cp.max_latency = cpu_to_le16(0xffff);
 			cp.retrans_effort = 0xff;
 			break;
@@ -879,8 +863,7 @@ static int sco_sock_getsockopt_old(struct socket *sock, int optname,
 	struct sock *sk = sock->sk;
 	struct sco_options opts;
 	struct sco_conninfo cinfo;
-	int err = 0;
-	size_t len;
+	int len, err = 0;
 
 	BT_DBG("sk %p", sk);
 
@@ -902,7 +885,7 @@ static int sco_sock_getsockopt_old(struct socket *sock, int optname,
 
 		BT_DBG("mtu %d", opts.mtu);
 
-		len = min(len, sizeof(opts));
+		len = min_t(unsigned int, len, sizeof(opts));
 		if (copy_to_user(optval, (char *)&opts, len))
 			err = -EFAULT;
 
@@ -920,7 +903,7 @@ static int sco_sock_getsockopt_old(struct socket *sock, int optname,
 		cinfo.hci_handle = sco_pi(sk)->conn->hcon->handle;
 		memcpy(cinfo.dev_class, sco_pi(sk)->conn->hcon->dev_class, 3);
 
-		len = min(len, sizeof(cinfo));
+		len = min_t(unsigned int, len, sizeof(cinfo));
 		if (copy_to_user(optval, (char *)&cinfo, len))
 			err = -EFAULT;
 

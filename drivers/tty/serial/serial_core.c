@@ -95,6 +95,9 @@ static void __uart_start(struct tty_struct *tty)
 	struct uart_state *state = tty->driver_data;
 	struct uart_port *port = state->uart_port;
 
+	if (port->ops->wake_peer)
+		port->ops->wake_peer(port);
+
 	if (!uart_tx_stopped(port))
 		port->ops->start_tx(port);
 }
@@ -768,14 +771,6 @@ static int uart_set_info(struct tty_struct *tty, struct tty_port *port,
 	new_flags = new_info->flags;
 	old_custom_divisor = uport->custom_divisor;
 
-	if (!(uport->flags & UPF_FIXED_PORT)) {
-		unsigned int uartclk = new_info->baud_base * 16;
-		/* check needs to be done here before other settings made */
-		if (uartclk == 0) {
-			retval = -EINVAL;
-			goto exit;
-		}
-	}
 	if (!capable(CAP_SYS_ADMIN)) {
 		retval = -EPERM;
 		if (change_irq || change_port ||
@@ -1023,7 +1018,7 @@ static int uart_break_ctl(struct tty_struct *tty, int break_state)
 
 	mutex_lock(&port->mutex);
 
-	if (uport->type != PORT_UNKNOWN && uport->ops->break_ctl)
+	if (uport->type != PORT_UNKNOWN)
 		uport->ops->break_ctl(uport, break_state);
 
 	mutex_unlock(&port->mutex);
@@ -2255,8 +2250,7 @@ uart_configure_port(struct uart_driver *drv, struct uart_state *state,
 		 * We probably don't need a spinlock around this, but
 		 */
 		spin_lock_irqsave(&port->lock, flags);
-		port->mctrl &= TIOCM_DTR;
-		port->ops->set_mctrl(port, port->mctrl);
+		port->ops->set_mctrl(port, port->mctrl & TIOCM_DTR);
 		spin_unlock_irqrestore(&port->lock, flags);
 
 		/*
@@ -2711,7 +2705,6 @@ int uart_add_one_port(struct uart_driver *drv, struct uart_port *uport)
 	if (uport->cons && uport->dev)
 		of_console_check(uport->dev->of_node, uport->cons->name, uport->line);
 
-	tty_port_link_device(port, drv->tty_driver, uport->line);
 	uart_configure_port(drv, state, uport);
 
 	num_groups = 2;

@@ -50,7 +50,6 @@
 #define DRIVER_VERSION	"02 May 2005"
 
 #define POWER_BUDGET	500	/* in mA; use 8 for low-power port testing */
-#define POWER_BUDGET_3	900	/* in mA */
 
 static const char	driver_name[] = "dummy_hcd";
 static const char	driver_desc[] = "USB Host+Gadget Emulator";
@@ -752,7 +751,7 @@ static int dummy_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 	struct dummy		*dum;
 	int			retval = -EINVAL;
 	unsigned long		flags;
-	struct dummy_request	*req = NULL, *iter;
+	struct dummy_request	*req = NULL;
 
 	if (!_ep || !_req)
 		return retval;
@@ -762,26 +761,25 @@ static int dummy_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 	if (!dum->driver)
 		return -ESHUTDOWN;
 
-	spin_lock_irqsave(&dum->lock, flags);
-	list_for_each_entry(iter, &ep->queue, queue) {
-		if (&iter->req != _req)
-			continue;
-		list_del_init(&iter->queue);
-		_req->status = -ECONNRESET;
-		req = iter;
-		retval = 0;
-		break;
+	local_irq_save(flags);
+	spin_lock(&dum->lock);
+	list_for_each_entry(req, &ep->queue, queue) {
+		if (&req->req == _req) {
+			list_del_init(&req->queue);
+			_req->status = -ECONNRESET;
+			retval = 0;
+			break;
+		}
 	}
+	spin_unlock(&dum->lock);
 
 	if (retval == 0) {
 		dev_dbg(udc_dev(dum),
 				"dequeued req %p from %s, len %d buf %p\n",
 				req, _ep->name, _req->length, _req->buf);
-		spin_unlock(&dum->lock);
 		usb_gadget_giveback_request(_ep, _req);
-		spin_lock(&dum->lock);
 	}
-	spin_unlock_irqrestore(&dum->lock, flags);
+	local_irq_restore(flags);
 	return retval;
 }
 
@@ -921,21 +919,6 @@ static int dummy_pullup(struct usb_gadget *_gadget, int value)
 	spin_lock_irqsave(&dum->lock, flags);
 	dum->pullup = (value != 0);
 	set_link_state(dum_hcd);
-	if (value == 0) {
-		/*
-		 * Emulate synchronize_irq(): wait for callbacks to finish.
-		 * This seems to be the best place to emulate the call to
-		 * synchronize_irq() that's in usb_gadget_remove_driver().
-		 * Doing it in dummy_udc_stop() would be too late since it
-		 * is called after the unbind callback and unbind shouldn't
-		 * be invoked until all the other callbacks are finished.
-		 */
-		while (dum->callback_usage > 0) {
-			spin_unlock_irqrestore(&dum->lock, flags);
-			usleep_range(1000, 2000);
-			spin_lock_irqsave(&dum->lock, flags);
-		}
-	}
 	spin_unlock_irqrestore(&dum->lock, flags);
 
 	usb_hcd_poll_rh_status(dummy_hcd_to_hcd(dum_hcd));
@@ -1016,6 +999,14 @@ static int dummy_udc_stop(struct usb_gadget *g)
 	spin_lock_irq(&dum->lock);
 	dum->ints_enabled = 0;
 	stop_activity(dum);
+
+	/* emulate synchronize_irq(): wait for callbacks to finish */
+	while (dum->callback_usage > 0) {
+		spin_unlock_irq(&dum->lock);
+		usleep_range(1000, 2000);
+		spin_lock_irq(&dum->lock);
+	}
+
 	dum->driver = NULL;
 	spin_unlock_irq(&dum->lock);
 
@@ -2444,7 +2435,7 @@ static int dummy_start_ss(struct dummy_hcd *dum_hcd)
 	dum_hcd->rh_state = DUMMY_RH_RUNNING;
 	dum_hcd->stream_en_ep = 0;
 	INIT_LIST_HEAD(&dum_hcd->urbp_list);
-	dummy_hcd_to_hcd(dum_hcd)->power_budget = POWER_BUDGET_3;
+	dummy_hcd_to_hcd(dum_hcd)->power_budget = POWER_BUDGET;
 	dummy_hcd_to_hcd(dum_hcd)->state = HC_STATE_RUNNING;
 	dummy_hcd_to_hcd(dum_hcd)->uses_new_polling = 1;
 #ifdef CONFIG_USB_OTG
@@ -2749,7 +2740,7 @@ static int __init init(void)
 {
 	int	retval = -ENOMEM;
 	int	i;
-	struct	dummy *dum[MAX_NUM_UDC] = {};
+	struct	dummy *dum[MAX_NUM_UDC];
 
 	if (usb_disabled())
 		return -ENODEV;

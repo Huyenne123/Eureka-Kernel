@@ -494,9 +494,7 @@ static void xgbe_stop_timers(struct xgbe_prv_data *pdata)
 		if (!channel->tx_ring)
 			break;
 
-		/* Deactivate the Tx timer */
 		del_timer_sync(&channel->tx_timer);
-		channel->tx_timer_active = 0;
 	}
 }
 
@@ -787,6 +785,7 @@ static void xgbe_free_rx_data(struct xgbe_prv_data *pdata)
 
 static int xgbe_phy_init(struct xgbe_prv_data *pdata)
 {
+	pdata->phy_link = -1;
 	pdata->phy_speed = SPEED_UNKNOWN;
 
 	return pdata->phy_if.phy_reset(pdata);
@@ -1391,7 +1390,7 @@ static int xgbe_close(struct net_device *netdev)
 	return 0;
 }
 
-static netdev_tx_t xgbe_xmit(struct sk_buff *skb, struct net_device *netdev)
+static int xgbe_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
 	struct xgbe_prv_data *pdata = netdev_priv(netdev);
 	struct xgbe_hw_if *hw_if = &pdata->hw_if;
@@ -1400,7 +1399,7 @@ static netdev_tx_t xgbe_xmit(struct sk_buff *skb, struct net_device *netdev)
 	struct xgbe_ring *ring;
 	struct xgbe_packet_data *packet;
 	struct netdev_queue *txq;
-	netdev_tx_t ret;
+	int ret;
 
 	DBGPR("-->xgbe_xmit: skb->len = %d\n", skb->len);
 
@@ -1562,7 +1561,7 @@ static struct rtnl_link_stats64 *xgbe_get_stats64(struct net_device *netdev,
 	s->multicast = pstats->rxmulticastframes_g;
 	s->rx_length_errors = pstats->rxlengtherror;
 	s->rx_crc_errors = pstats->rxcrcerror;
-	s->rx_over_errors = pstats->rxfifooverflow;
+	s->rx_fifo_errors = pstats->rxfifooverflow;
 
 	s->tx_packets = pstats->txframecount_gb;
 	s->tx_bytes = pstats->txoctetcount_gb;
@@ -1961,6 +1960,9 @@ read_again:
 			goto read_again;
 
 		if (error || packet->errors) {
+			if (packet->errors)
+				netif_err(pdata, rx_err, netdev,
+					  "error in received packet\n");
 			dev_kfree_skb(skb);
 			goto next_packet;
 		}
@@ -1971,14 +1973,6 @@ read_again:
 			len += buf1_len;
 			buf2_len = xgbe_rx_buf2_len(rdata, packet, len);
 			len += buf2_len;
-
-			if (buf2_len > rdata->rx.buf.dma_len) {
-				/* Hardware inconsistency within the descriptors
-				 * that has resulted in a length underflow.
-				 */
-				error = 1;
-				goto skip_data;
-			}
 
 			if (!skb) {
 				skb = xgbe_create_skb(pdata, napi, rdata,
@@ -2009,10 +2003,8 @@ skip_data:
 		if (!last || context_next)
 			goto read_again;
 
-		if (!skb || error) {
-			dev_kfree_skb(skb);
+		if (!skb)
 			goto next_packet;
-		}
 
 		/* Be sure we don't exceed the configured MTU */
 		max_len = netdev->mtu + ETH_HLEN;

@@ -387,8 +387,7 @@ static bool is_an_alpha2(const char *alpha2)
 {
 	if (!alpha2)
 		return false;
-	return isascii(alpha2[0]) && isalpha(alpha2[0]) &&
-	       isascii(alpha2[1]) && isalpha(alpha2[1]);
+	return isalpha(alpha2[0]) && isalpha(alpha2[1]);
 }
 
 static bool alpha2_equal(const char *alpha2_x, const char *alpha2_y)
@@ -1605,7 +1604,7 @@ static void reg_call_notifier(struct wiphy *wiphy,
 
 static bool reg_wdev_chan_valid(struct wiphy *wiphy, struct wireless_dev *wdev)
 {
-	struct cfg80211_chan_def chandef = {};
+	struct cfg80211_chan_def chandef;
 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wiphy);
 	enum nl80211_iftype iftype;
 
@@ -1882,6 +1881,18 @@ static void reg_set_request_processed(void)
 {
 	bool need_more_processing = false;
 	struct regulatory_request *lr = get_last_request();
+
+#ifdef CONFIG_CFG80211_REG_NOT_UPDATED
+	/*
+	* SAMSUNG FIX : Regulatory Configuration was update
+	* via WIPHY_FLAG_CUSTOM_REGULATORY of Wi-Fi Driver.
+	* Regulation should not updated even if device found other country Access Point Beacon once
+	* since device should find around other Access Points.
+	* 2014.1.8 Convergence Wi-Fi Core
+	*/
+	printk("regulatory is not upadted via %s.\n", __func__);
+	return;
+#endif
 
 	lr->processed = true;
 
@@ -2235,7 +2246,7 @@ static void reg_process_pending_hints(void)
 
 	/* When last_request->processed becomes true this will be rescheduled */
 	if (lr && !lr->processed) {
-		pr_debug("Pending regulatory request, waiting for it to be processed...\n");
+		reg_process_hint(lr);
 		return;
 	}
 
@@ -2343,6 +2354,21 @@ static void reg_todo(struct work_struct *work)
 
 static void queue_regulatory_request(struct regulatory_request *request)
 {
+	/*
+	* SAMSUNG FIX : Regulatory Configuration was update
+	* via WIPHY_FLAG_CUSTOM_REGULATORY of Wi-Fi Driver.
+	* Regulation should not updated even if device found other country Access Point Beacon once
+	* since device should find around other Access Points.
+	* 2014.1.8 Convergence Wi-Fi Core
+	*/
+
+#ifdef CONFIG_CFG80211_REG_NOT_UPDATED
+	printk("regulatory is not upadted via %s.\n", __func__);
+	if(!request)
+		kfree(request);
+	return;
+#endif
+
 	request->alpha2[0] = toupper(request->alpha2[0]);
 	request->alpha2[1] = toupper(request->alpha2[1]);
 
@@ -2382,9 +2408,6 @@ int regulatory_hint_user(const char *alpha2,
 	struct regulatory_request *request;
 
 	if (WARN_ON(!alpha2))
-		return -EINVAL;
-
-	if (!is_world_regdom(alpha2) && !is_an_alpha2(alpha2))
 		return -EINVAL;
 
 	request = kzalloc(sizeof(struct regulatory_request), GFP_KERNEL);
@@ -2619,6 +2642,19 @@ static void restore_regulatory_settings(bool reset_user)
 	LIST_HEAD(tmp_reg_req_list);
 	struct cfg80211_registered_device *rdev;
 
+	/*
+	* SAMSUNG FIX : Regulatory Configuration was update
+	* via WIPHY_FLAG_CUSTOM_REGULATORY of Wi-Fi Driver.
+	* Regulation should not updated even if device found other country Access Point Beacon once
+	* since device should find around other Access Points.
+	* 2014.1.8 Convergence Wi-Fi Core
+	*/
+
+#ifdef CONFIG_CFG80211_REG_NOT_UPDATED
+	printk("regulatory is not upadted via %s.\n", __func__);
+	return;
+#endif
+
 	ASSERT_RTNL();
 
 	/*
@@ -2722,6 +2758,19 @@ int regulatory_hint_found_beacon(struct wiphy *wiphy,
 	struct reg_beacon *reg_beacon;
 	bool processing;
 
+	/*
+	* SAMSUNG FIX : Regulatory Configuration was update
+	* via WIPHY_FLAG_CUSTOM_REGULATORY of Wi-Fi Driver.
+	* Regulation should not updated even if device found other country Access Point Beacon once
+	* since device should find around other Access Points.
+	* 2014.1.8 Convergence Wi-Fi Core
+	*/
+
+#ifdef CONFIG_CFG80211_REG_NOT_UPDATED
+//	printk("regulatory is not upadted via %s.\n",__func__);
+	return 0;
+#endif
+
 	if (beacon_chan->beacon_found ||
 	    beacon_chan->flags & IEEE80211_CHAN_RADAR ||
 	    (beacon_chan->band == IEEE80211_BAND_2GHZ &&
@@ -2768,7 +2817,7 @@ static void print_rd_rules(const struct ieee80211_regdomain *rd)
 	const struct ieee80211_power_rule *power_rule = NULL;
 	char bw[32], cac_time[32];
 
-	pr_debug("  (start_freq - end_freq @ bandwidth), (max_antenna_gain, max_eirp), (dfs_cac_time)\n");
+	pr_info("  (start_freq - end_freq @ bandwidth), (max_antenna_gain, max_eirp), (dfs_cac_time)\n");
 
 	for (i = 0; i < rd->n_reg_rules; i++) {
 		reg_rule = &rd->reg_rules[i];
@@ -2776,7 +2825,7 @@ static void print_rd_rules(const struct ieee80211_regdomain *rd)
 		power_rule = &reg_rule->power_rule;
 
 		if (reg_rule->flags & NL80211_RRF_AUTO_BW)
-			snprintf(bw, sizeof(bw), "%d KHz, %u KHz AUTO",
+			snprintf(bw, sizeof(bw), "%d KHz, %d KHz AUTO",
 				 freq_range->max_bandwidth_khz,
 				 reg_get_max_bandwidth(rd, reg_rule));
 		else
@@ -2795,7 +2844,7 @@ static void print_rd_rules(const struct ieee80211_regdomain *rd)
 		 * in certain regions
 		 */
 		if (power_rule->max_antenna_gain)
-			pr_debug("  (%d KHz - %d KHz @ %s), (%d mBi, %d mBm), (%s)\n",
+			pr_info("  (%d KHz - %d KHz @ %s), (%d mBi, %d mBm), (%s)\n",
 				freq_range->start_freq_khz,
 				freq_range->end_freq_khz,
 				bw,
@@ -2803,7 +2852,7 @@ static void print_rd_rules(const struct ieee80211_regdomain *rd)
 				power_rule->max_eirp,
 				cac_time);
 		else
-			pr_debug("  (%d KHz - %d KHz @ %s), (N/A, %d mBm), (%s)\n",
+			pr_info("  (%d KHz - %d KHz @ %s), (N/A, %d mBm), (%s)\n",
 				freq_range->start_freq_khz,
 				freq_range->end_freq_khz,
 				bw,
@@ -2836,35 +2885,35 @@ static void print_regdomain(const struct ieee80211_regdomain *rd)
 			struct cfg80211_registered_device *rdev;
 			rdev = cfg80211_rdev_by_wiphy_idx(lr->wiphy_idx);
 			if (rdev) {
-				pr_debug("Current regulatory domain updated by AP to: %c%c\n",
+				pr_info("Current regulatory domain updated by AP to: %c%c\n",
 					rdev->country_ie_alpha2[0],
 					rdev->country_ie_alpha2[1]);
 			} else
-				pr_debug("Current regulatory domain intersected:\n");
+				pr_info("Current regulatory domain intersected:\n");
 		} else
-			pr_debug("Current regulatory domain intersected:\n");
+			pr_info("Current regulatory domain intersected:\n");
 	} else if (is_world_regdom(rd->alpha2)) {
-		pr_debug("World regulatory domain updated:\n");
+		pr_info("World regulatory domain updated:\n");
 	} else {
 		if (is_unknown_alpha2(rd->alpha2))
-			pr_debug("Regulatory domain changed to driver built-in settings (unknown country)\n");
+			pr_info("Regulatory domain changed to driver built-in settings (unknown country)\n");
 		else {
 			if (reg_request_cell_base(lr))
-				pr_debug("Regulatory domain changed to country: %c%c by Cell Station\n",
+				pr_info("Regulatory domain changed to country: %c%c by Cell Station\n",
 					rd->alpha2[0], rd->alpha2[1]);
 			else
-				pr_debug("Regulatory domain changed to country: %c%c\n",
+				pr_info("Regulatory domain changed to country: %c%c\n",
 					rd->alpha2[0], rd->alpha2[1]);
 		}
 	}
 
-	pr_debug(" DFS Master region: %s", reg_dfs_region_str(rd->dfs_region));
+	pr_info(" DFS Master region: %s", reg_dfs_region_str(rd->dfs_region));
 	print_rd_rules(rd);
 }
 
 static void print_regdomain_info(const struct ieee80211_regdomain *rd)
 {
-	pr_debug("Regulatory domain: %c%c\n", rd->alpha2[0], rd->alpha2[1]);
+	pr_info("Regulatory domain: %c%c\n", rd->alpha2[0], rd->alpha2[1]);
 	print_rd_rules(rd);
 }
 
@@ -2885,8 +2934,7 @@ static int reg_set_rd_user(const struct ieee80211_regdomain *rd,
 		return -EALREADY;
 
 	if (!is_valid_rd(rd)) {
-		pr_err("Invalid regulatory domain detected: %c%c\n",
-		       rd->alpha2[0], rd->alpha2[1]);
+		pr_err("Invalid regulatory domain detected:\n");
 		print_regdomain_info(rd);
 		return -EINVAL;
 	}
@@ -2922,8 +2970,7 @@ static int reg_set_rd_driver(const struct ieee80211_regdomain *rd,
 		return -EALREADY;
 
 	if (!is_valid_rd(rd)) {
-		pr_err("Invalid regulatory domain detected: %c%c\n",
-		       rd->alpha2[0], rd->alpha2[1]);
+		pr_err("Invalid regulatory domain detected:\n");
 		print_regdomain_info(rd);
 		return -EINVAL;
 	}
@@ -2981,8 +3028,7 @@ static int reg_set_rd_country_ie(const struct ieee80211_regdomain *rd,
 	 */
 
 	if (!is_valid_rd(rd)) {
-		pr_err("Invalid regulatory domain detected: %c%c\n",
-		       rd->alpha2[0], rd->alpha2[1]);
+		pr_err("Invalid regulatory domain detected:\n");
 		print_regdomain_info(rd);
 		return -EINVAL;
 	}

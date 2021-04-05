@@ -1202,7 +1202,7 @@ static void uvc_ctrl_fill_event(struct uvc_video_chain *chain,
 
 	__uvc_query_v4l2_ctrl(chain, ctrl, mapping, &v4l2_ctrl);
 
-	memset(ev, 0, sizeof(*ev));
+	memset(ev->reserved, 0, sizeof(ev->reserved));
 	ev->type = V4L2_EVENT_CTRL;
 	ev->id = v4l2_ctrl.id;
 	ev->u.ctrl.value = value;
@@ -1386,14 +1386,9 @@ int uvc_ctrl_begin(struct uvc_video_chain *chain)
 	return mutex_lock_interruptible(&chain->ctrl_mutex) ? -ERESTARTSYS : 0;
 }
 
-/*
- * Returns the number of uvc controls that have been correctly set, or a
- * negative number if there has been an error.
- */
 static int uvc_ctrl_commit_entity(struct uvc_device *dev,
 	struct uvc_entity *entity, int rollback)
 {
-	unsigned int processed_ctrls = 0;
 	struct uvc_control *ctrl;
 	unsigned int i;
 	int ret;
@@ -1427,9 +1422,6 @@ static int uvc_ctrl_commit_entity(struct uvc_device *dev,
 		else
 			ret = 0;
 
-		if (!ret)
-			processed_ctrls++;
-
 		if (rollback || ret < 0)
 			memcpy(uvc_ctrl_data(ctrl, UVC_CTRL_DATA_CURRENT),
 			       uvc_ctrl_data(ctrl, UVC_CTRL_DATA_BACKUP),
@@ -1441,7 +1433,7 @@ static int uvc_ctrl_commit_entity(struct uvc_device *dev,
 			return ret;
 	}
 
-	return processed_ctrls;
+	return 0;
 }
 
 int __uvc_ctrl_commit(struct uvc_fh *handle, int rollback,
@@ -1461,7 +1453,6 @@ int __uvc_ctrl_commit(struct uvc_fh *handle, int rollback,
 
 	if (!rollback)
 		uvc_ctrl_send_events(handle, xctrls, xctrls_count);
-	ret = 0;
 done:
 	mutex_unlock(&chain->ctrl_mutex);
 	return ret;

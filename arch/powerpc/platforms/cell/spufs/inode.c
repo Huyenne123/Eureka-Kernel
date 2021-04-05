@@ -207,10 +207,8 @@ static int spufs_fill_dir(struct dentry *dir,
 			return -ENOMEM;
 		ret = spufs_new_file(dir->d_sb, dentry, files->ops,
 					files->mode & mode, files->size, ctx);
-		if (ret) {
-			dput(dentry);
+		if (ret)
 			return ret;
-		}
 		files++;
 	}
 	return 0;

@@ -25,6 +25,7 @@
 #include <linux/mount.h>
 #include <linux/personality.h>
 #include <linux/backing-dev.h>
+#include <linux/task_integrity.h>
 #include <net/flow.h>
 
 #define MAX_LSM_EVM_XATTR	2
@@ -105,11 +106,12 @@ int __init security_module_enable(const char *module)
  * call_int_hook:
  *	This is a hook that returns a value.
  */
-
+//CONFIG_RKP_KDP
 #define call_void_hook(FUNC, ...)				\
 	do {							\
 		struct security_hook_list *P;			\
 								\
+		if(security_integrity_current()) break;		\
 		list_for_each_entry(P, &security_hook_heads.FUNC, list)	\
 			P->hook.FUNC(__VA_ARGS__);		\
 	} while (0)
@@ -119,6 +121,9 @@ int __init security_module_enable(const char *module)
 	do {							\
 		struct security_hook_list *P;			\
 								\
+		RC = security_integrity_current();		\
+		if (RC != 0)					\
+			break;					\
 		list_for_each_entry(P, &security_hook_heads.FUNC, list) { \
 			RC = P->hook.FUNC(__VA_ARGS__);		\
 			if (RC != 0)				\
@@ -130,25 +135,25 @@ int __init security_module_enable(const char *module)
 
 /* Security operations */
 
-int security_binder_set_context_mgr(const struct cred *mgr)
+int security_binder_set_context_mgr(struct task_struct *mgr)
 {
 	return call_int_hook(binder_set_context_mgr, 0, mgr);
 }
 
-int security_binder_transaction(const struct cred *from,
-				const struct cred *to)
+int security_binder_transaction(struct task_struct *from,
+				struct task_struct *to)
 {
 	return call_int_hook(binder_transaction, 0, from, to);
 }
 
-int security_binder_transfer_binder(const struct cred *from,
-				    const struct cred *to)
+int security_binder_transfer_binder(struct task_struct *from,
+				    struct task_struct *to)
 {
 	return call_int_hook(binder_transfer_binder, 0, from, to);
 }
 
-int security_binder_transfer_file(const struct cred *from,
-				  const struct cred *to, struct file *file)
+int security_binder_transfer_file(struct task_struct *from,
+				  struct task_struct *to, struct file *file)
 {
 	return call_int_hook(binder_transfer_file, 0, from, to, file);
 }
@@ -246,6 +251,9 @@ int security_bprm_check(struct linux_binprm *bprm)
 	int ret;
 
 	ret = call_int_hook(bprm_check_security, 0, bprm);
+	if (ret)
+		return ret;
+	ret = five_bprm_check(bprm);
 	if (ret)
 		return ret;
 	return ima_bprm_check(bprm);
@@ -498,6 +506,7 @@ int security_path_chown(struct path *path, kuid_t uid, kgid_t gid)
 		return 0;
 	return call_int_hook(path_chown, 0, path, uid, gid);
 }
+EXPORT_SYMBOL(security_path_chown);
 
 int security_path_chroot(struct path *path)
 {
@@ -637,6 +646,9 @@ int security_inode_setxattr(struct dentry *dentry, const char *name,
 		ret = cap_inode_setxattr(dentry, name, value, size, flags);
 	if (ret)
 		return ret;
+	ret = five_inode_setxattr(dentry, name, value, size);
+	if (ret)
+		return ret;
 	ret = ima_inode_setxattr(dentry, name, value, size);
 	if (ret)
 		return ret;
@@ -679,6 +691,9 @@ int security_inode_removexattr(struct dentry *dentry, const char *name)
 	ret = call_int_hook(inode_removexattr, 1, dentry, name);
 	if (ret == 1)
 		ret = cap_inode_removexattr(dentry, name);
+	if (ret)
+		return ret;
+	ret = five_inode_removexattr(dentry, name);
 	if (ret)
 		return ret;
 	ret = ima_inode_removexattr(dentry, name);
@@ -788,13 +803,15 @@ static inline unsigned long mmap_prot(struct file *file, unsigned long prot)
 int security_mmap_file(struct file *file, unsigned long prot,
 			unsigned long flags)
 {
-	unsigned long prot_adj = mmap_prot(file, prot);
 	int ret;
-
-	ret = call_int_hook(mmap_file, 0, file, prot, prot_adj, flags);
+	ret = call_int_hook(mmap_file, 0, file, prot,
+					mmap_prot(file, prot), flags);
 	if (ret)
 		return ret;
-	return ima_file_mmap(file, prot, prot_adj, flags);
+	ret = five_file_mmap(file, prot);
+	if (ret)
+		return ret;
+	return ima_file_mmap(file, prot);
 }
 
 int security_mmap_addr(unsigned long addr)
@@ -842,7 +859,11 @@ int security_file_open(struct file *file, const struct cred *cred)
 	if (ret)
 		return ret;
 
-	return fsnotify_perm(file, MAY_OPEN);
+	ret = fsnotify_perm(file, MAY_OPEN);
+	if (ret)
+		return ret;
+
+	return five_file_open(file);
 }
 
 int security_task_create(unsigned long clone_flags)
@@ -853,6 +874,7 @@ int security_task_create(unsigned long clone_flags)
 void security_task_free(struct task_struct *task)
 {
 	call_void_hook(task_free, task);
+	five_task_free(task);
 }
 
 int security_cred_alloc_blank(struct cred *cred, gfp_t gfp)
@@ -986,6 +1008,11 @@ int security_task_kill(struct task_struct *p, struct siginfo *info,
 			int sig, u32 secid)
 {
 	return call_int_hook(task_kill, 0, p, info, sig, secid);
+}
+
+int security_task_wait(struct task_struct *p)
+{
+	return call_int_hook(task_wait, 0, p);
 }
 
 int security_task_prctl(int option, unsigned long arg2, unsigned long arg3,
@@ -1715,6 +1742,7 @@ struct security_hook_heads security_hook_heads = {
 	.task_movememory =
 		LIST_HEAD_INIT(security_hook_heads.task_movememory),
 	.task_kill =	LIST_HEAD_INIT(security_hook_heads.task_kill),
+	.task_wait =	LIST_HEAD_INIT(security_hook_heads.task_wait),
 	.task_prctl =	LIST_HEAD_INIT(security_hook_heads.task_prctl),
 	.task_to_inode =
 		LIST_HEAD_INIT(security_hook_heads.task_to_inode),

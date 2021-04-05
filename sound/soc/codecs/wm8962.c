@@ -2178,9 +2178,6 @@ SND_SOC_DAPM_PGA_E("HPOUT", SND_SOC_NOPM, 0, 0, NULL, 0, hp_event,
 
 SND_SOC_DAPM_OUTPUT("HPOUTL"),
 SND_SOC_DAPM_OUTPUT("HPOUTR"),
-
-SND_SOC_DAPM_PGA("SPKOUTL Output", WM8962_CLASS_D_CONTROL_1, 6, 0, NULL, 0),
-SND_SOC_DAPM_PGA("SPKOUTR Output", WM8962_CLASS_D_CONTROL_1, 7, 0, NULL, 0),
 };
 
 static const struct snd_soc_dapm_widget wm8962_dapm_spk_mono_widgets[] = {
@@ -2188,6 +2185,7 @@ SND_SOC_DAPM_MIXER("Speaker Mixer", WM8962_MIXER_ENABLES, 1, 0,
 		   spkmixl, ARRAY_SIZE(spkmixl)),
 SND_SOC_DAPM_MUX_E("Speaker PGA", WM8962_PWR_MGMT_2, 4, 0, &spkoutl_mux,
 		   out_pga_event, SND_SOC_DAPM_POST_PMU),
+SND_SOC_DAPM_PGA("Speaker Output", WM8962_CLASS_D_CONTROL_1, 7, 0, NULL, 0),
 SND_SOC_DAPM_OUTPUT("SPKOUT"),
 };
 
@@ -2201,6 +2199,9 @@ SND_SOC_DAPM_MUX_E("SPKOUTL PGA", WM8962_PWR_MGMT_2, 4, 0, &spkoutl_mux,
 		   out_pga_event, SND_SOC_DAPM_POST_PMU),
 SND_SOC_DAPM_MUX_E("SPKOUTR PGA", WM8962_PWR_MGMT_2, 3, 0, &spkoutr_mux,
 		   out_pga_event, SND_SOC_DAPM_POST_PMU),
+
+SND_SOC_DAPM_PGA("SPKOUTR Output", WM8962_CLASS_D_CONTROL_1, 7, 0, NULL, 0),
+SND_SOC_DAPM_PGA("SPKOUTL Output", WM8962_CLASS_D_CONTROL_1, 6, 0, NULL, 0),
 
 SND_SOC_DAPM_OUTPUT("SPKOUTL"),
 SND_SOC_DAPM_OUTPUT("SPKOUTR"),
@@ -2311,18 +2312,12 @@ static const struct snd_soc_dapm_route wm8962_spk_mono_intercon[] = {
 	{ "Speaker PGA", "Mixer", "Speaker Mixer" },
 	{ "Speaker PGA", "DAC", "DACL" },
 
-	{ "SPKOUTL Output", NULL, "Speaker PGA" },
-	{ "SPKOUTL Output", NULL, "SYSCLK" },
-	{ "SPKOUTL Output", NULL, "TOCLK" },
-	{ "SPKOUTL Output", NULL, "TEMP_SPK" },
+	{ "Speaker Output", NULL, "Speaker PGA" },
+	{ "Speaker Output", NULL, "SYSCLK" },
+	{ "Speaker Output", NULL, "TOCLK" },
+	{ "Speaker Output", NULL, "TEMP_SPK" },
 
-	{ "SPKOUTR Output", NULL, "Speaker PGA" },
-	{ "SPKOUTR Output", NULL, "SYSCLK" },
-	{ "SPKOUTR Output", NULL, "TOCLK" },
-	{ "SPKOUTR Output", NULL, "TEMP_SPK" },
-
-	{ "SPKOUT", NULL, "SPKOUTL Output" },
-	{ "SPKOUT", NULL, "SPKOUTR Output" },
+	{ "SPKOUT", NULL, "Speaker Output" },
 };
 
 static const struct snd_soc_dapm_route wm8962_spk_stereo_intercon[] = {
@@ -2797,7 +2792,7 @@ static int fll_factors(struct _fll_div *fll_div, unsigned int Fref,
 
 	if (target % Fref == 0) {
 		fll_div->theta = 0;
-		fll_div->lambda = 1;
+		fll_div->lambda = 0;
 	} else {
 		gcd_fll = gcd(target, fratio * Fref);
 
@@ -2863,11 +2858,11 @@ static int wm8962_set_fll(struct snd_soc_codec *codec, int fll_id, int source,
 				    WM8962_FLL_FRC_NCO, WM8962_FLL_FRC_NCO);
 		break;
 	default:
-		dev_err(codec->dev, "Unknown FLL source %d\n", source);
+		dev_err(codec->dev, "Unknown FLL source %d\n", ret);
 		return -EINVAL;
 	}
 
-	if (fll_div.theta)
+	if (fll_div.theta || fll_div.lambda)
 		fll1 |= WM8962_FLL_FRAC;
 
 	/* Stop the FLL while we reconfigure */
@@ -3869,7 +3864,6 @@ static int wm8962_runtime_suspend(struct device *dev)
 #endif
 
 static const struct dev_pm_ops wm8962_pm = {
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
 	SET_RUNTIME_PM_OPS(wm8962_runtime_suspend, wm8962_runtime_resume, NULL)
 };
 
