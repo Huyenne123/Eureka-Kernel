@@ -1393,7 +1393,7 @@ static struct pci_driver mlx5_core_driver = {
 	.err_handler	= &mlx5_err_handler
 };
 
-static int __init init(void)
+static int __init mlx5_init(void)
 {
 	int err;
 
@@ -1414,7 +1414,7 @@ err_debug:
 	return err;
 }
 
-static void __exit cleanup(void)
+static void __exit mlx5_cleanup(void)
 {
 #ifdef CONFIG_MLX5_CORE_EN
 	mlx5e_cleanup();
@@ -1423,5 +1423,5 @@ static void __exit cleanup(void)
 	mlx5_unregister_debugfs();
 }
 
-module_init(init);
-module_exit(cleanup);
+module_init(mlx5_init);
+module_exit(mlx5_cleanup);
