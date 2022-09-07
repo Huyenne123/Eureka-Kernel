@@ -1,4 +1,3 @@
-
 #include <linux/sched.h>
 #include <linux/sched/sysctl.h>
 #include <linux/sched/rt.h>
@@ -1601,6 +1600,9 @@ task_rq_unlock(struct rq *rq, struct task_struct *p, unsigned long *flags)
 	raw_spin_unlock(&rq->lock);
 	raw_spin_unlock_irqrestore(&p->pi_lock, *flags);
 }
+
+extern struct rq *lock_rq_of(struct task_struct *p, unsigned long *flags);
+extern void unlock_rq_of(struct rq *rq, struct task_struct *p, unsigned long *flags);
 
 #ifdef CONFIG_SMP
 #ifdef CONFIG_PREEMPT
