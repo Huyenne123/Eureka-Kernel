@@ -160,7 +160,7 @@ restart:
 
 void btrfs_free_dummy_root(struct btrfs_root *root)
 {
-	if (!root)
+	if (IS_ERR_OR_NULL(root))
 		return;
 	if (root->node)
 		free_extent_buffer(root->node);
