@@ -402,9 +402,6 @@ static int fuse_flush(struct file *file, fl_owner_t id)
 	if (is_bad_inode(inode))
 		return -EIO;
 
-	if (fc->no_flush)
-		return 0;
-
 	err = write_inode_now(inode, 1);
 	if (err)
 		return err;
@@ -421,6 +418,9 @@ static int fuse_flush(struct file *file, fl_owner_t id)
 		err = -EIO;
 	if (err)
 		return err;
+
+	if (fc->no_flush)
+		return 0;
 
 	req = fuse_get_req_nofail_nopages(fc, file);
 	memset(&inarg, 0, sizeof(inarg));
