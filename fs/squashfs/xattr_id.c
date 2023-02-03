@@ -80,7 +80,7 @@ __le64 *squashfs_read_xattr_id_table(struct super_block *sb, u64 start,
 	/* Sanity check values */
 
 	/* there is always at least one xattr id */
-	if (*xattr_ids <= 0)
+	if (*xattr_ids == 0)
 		return ERR_PTR(-EINVAL);
 
 	/* xattr_table should be less than start */
