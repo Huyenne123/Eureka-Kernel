@@ -129,6 +129,9 @@ static int cfusbl_device_notify(struct notifier_block *me, unsigned long what,
 	struct usbnet *usbnet;
 	struct usb_device *usbdev;
 
+	if (what == NETDEV_UNREGISTER && dev->reg_state >= NETREG_UNREGISTERED)
+		return 0;
+
 	/* Check whether we have a NCM device, and find its VID/PID. */
 	if (!(dev->dev.parent && dev->dev.parent->driver &&
 	      strcmp(dev->dev.parent->driver->name, "cdc_ncm") == 0))
