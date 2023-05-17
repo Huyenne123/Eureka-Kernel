@@ -1330,7 +1330,7 @@ static struct ctl_table vm_table[] = {
 		.procname	= "page-cluster", 
 		.data		= &page_cluster,
 		.maxlen		= sizeof(int),
-		.mode		= 0644,
+		.mode		= 0666,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
 	},
