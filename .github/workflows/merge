@@ -1,0 +1,71 @@
+name: Merge BPF files from R24U into R15-OneUI (with headers)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ R15-OneUI ]
+
+env:
+  MERGE_FROM_BRANCH: R24U
+  TARGET_BRANCH: R15-OneUI
+  NEW_BRANCH_PREFIX: R15-OneUI-bpf-merged
+
+jobs:
+  merge-bpf:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          path: kernel
+          fetch-depth: 0
+
+      - name: Set Git user
+        working-directory: ./kernel
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Fetch source branch
+        working-directory: ./kernel
+        run: git fetch origin ${{ env.MERGE_FROM_BRANCH }}
+
+      - name: Extract and apply BPF-related files
+        working-directory: ./kernel
+        run: |
+          # Extended pattern: catch files containing 'bpf' in path, plus common headers
+          bpf_files=$(git ls-tree -r origin/${{ env.MERGE_FROM_BRANCH }} --name-only | \
+            grep -E -i '(bpf|include/linux/bpf|include/uapi/linux/bpf|filter\.h|net/bpf|kernel/bpf)' || true)
+
+          if [ -z "$bpf_files" ]; then
+            echo "No BPF files found."
+            exit 0
+          fi
+
+          echo "Found BPF files:"
+          echo "$bpf_files"
+
+          echo "$bpf_files" | while read -r file; do
+            git checkout origin/${{ env.MERGE_FROM_BRANCH }} -- "$file" 2>/dev/null || echo "Warning: could not checkout $file"
+          done
+
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Merge BPF files (including headers) from ${{ env.MERGE_FROM_BRANCH }}"
+          else
+            echo "No changes."
+          fi
+
+      - name: Create unique branch
+        working-directory: ./kernel
+        run: |
+          timestamp=$(date +%Y%m%d-%H%M%S)
+          random=$(openssl rand -hex 4)
+          new_branch="${{ env.NEW_BRANCH_PREFIX }}-${timestamp}-${random}"
+          git checkout -b "$new_branch"
+          git push origin "$new_branch"
+          echo "NEW_BRANCH=$new_branch" >> $GITHUB_ENV
+
+      - name: Output new branch name
+        run: echo "✅ New branch created: ${{ env.NEW_BRANCH }}"
