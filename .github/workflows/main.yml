@@ -26,25 +26,10 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-      # Remove any existing KernelSU to avoid submodule conflicts
-      - name: Purge KernelSU
-        working-directory: ./kernel
-        run: |
-          if [ -e "KernelSU" ]; then
-            git rm -rf KernelSU
-          fi
-          if [ -f ".gitmodules" ] && grep -q 'submodule "KernelSU"' .gitmodules; then
-            git config --file .gitmodules --remove-section submodule.KernelSU 2>/dev/null || true
-            git add .gitmodules
-          fi
-          git add -A
-          git commit -m "Purge KernelSU before merge" || echo "No changes"
-          
       - name: Setup KernelSUNext
         working-directory: ./kernel
         run: 
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
-          ls driver/kernelsu
       
       - name: Enable KernelSU in defconfig
         working-directory: ./kernel
