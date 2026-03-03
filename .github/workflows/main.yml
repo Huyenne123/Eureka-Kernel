@@ -56,7 +56,7 @@ jobs:
           tail -10 arch/arm64/configs/exynos7885-a30_defconfig
       - name: Remove KernelSU hook check
         run: |
-          sed -i '108,110d' driver/kernelsu/KBuild
+          sed -i '108,110d' KernelSU-Next/KBuild
         continue-on-error: true
           
       - name: Install build dependencies
