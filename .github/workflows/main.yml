@@ -57,6 +57,7 @@ jobs:
       - name: Remove KernelSU hook check
         run: |
           sed -i '108,110d' driver/kernelsu/KBuild
+        continue-on-error: true
           
       - name: Install build dependencies
         run: |
