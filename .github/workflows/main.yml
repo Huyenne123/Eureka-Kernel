@@ -42,8 +42,9 @@ jobs:
           
       - name: Setup KernelSUNext
         working-directory: ./kernel
-        run: 
+        run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+          ls driver/kernelsu
       
       - name: Enable KernelSU in defconfig
         working-directory: ./kernel
