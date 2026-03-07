@@ -15,7 +15,7 @@ jobs:
     steps:
     - name: yes
       run:
-        ls > yes.txt
+        ls | tee yes.txt
     - name: Upload zip
       uses: actions/upload-artifact@v4
       with:
