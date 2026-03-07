@@ -1,0 +1,18 @@
+name: yes
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ testing ]
+
+env:
+  KERNEL_BRANCH: testing
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: yes
+      run:
+        ls
