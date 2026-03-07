@@ -70,7 +70,7 @@ jobs:
 
       - name: Prepare AnyKernel from source
         run: |
-          cp -r kernel_zip/anykernel anykernel
+          cp -r kernel/kernel_zip/anykernel anykernel
 
       - name: Copy kernel image
         run: |
