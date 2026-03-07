@@ -25,7 +25,32 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+      - name: Purge KernelSU
+        working-directory: ./kernel
+        run: |
+          if [ -e "KernelSU" ]; then
+            git rm -rf KernelSU
+          fi
+          if [ -f ".gitmodules" ] && grep -q 'submodule "KernelSU"' .gitmodules; then
+            git config --file .gitmodules --remove-section submodule.KernelSU 2>/dev/null || true
+            git add .gitmodules
+          fi
+          git add -A
+          git commit -m "Purge KernelSU before merge" || echo "No changes"
           
+      - name: Setup KernelSUNext
+        working-directory: ./kernel
+        run: 
+          curl -LSs "https://raw.githubusercontent.com/Huyenne123/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+      
+      - name: Enable KernelSU in defconfig
+        working-directory: ./kernel
+        run: |
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/exynos7885-a30_defconfig
+          echo "CONFIG_KPROBES=y" >> arch/arm64/configs/exynos7885-a30_defconfig
+          echo "CONFIG_HAVE_KPROBES=y" >> arch/arm64/configs/exynos7885-a30_defconfig
+          echo "CONFIG_KPROBES_EVENTS=y" >> arch/arm64/configs/exynos7885-a30_defconfig
+          tail -10 arch/arm64/configs/exynos7885-a30_defconfig
       - name: Install build dependencies
         run: |
           sudo apt update
