@@ -29,7 +29,10 @@ jobs:
         with:
           fetch-depth: 0   # fetch all history for proper merging
           ref: ${{ github.event.inputs.source_branch }}
-
+      - name: setup workflow
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
       - name: Add CIP remote and fetch
         run: |
           git remote add cip ${{ github.event.inputs.cip_remote_url }}
