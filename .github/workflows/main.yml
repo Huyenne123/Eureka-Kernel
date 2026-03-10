@@ -54,6 +54,7 @@ jobs:
           git merge --abort 2>/dev/null || true
           exit 1
          fi
+        continue-on-error: true
       - name: Push merged branch
         if: success()
         env:
