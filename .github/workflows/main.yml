@@ -43,15 +43,14 @@ jobs:
       - name: Merge CIP ref into current branch
         id: merge
         run: |
-          # Attempt merge with no-fast-forward to preserve history
-          if git merge --no-ff --no-edit FETCH_HEAD; then
-            echo "Merge successful"
-          else
-            echo "Merge conflict detected. Aborting."
-            git merge --abort
-            exit 1
-          fi
-
+        # Attempt merge with --allow-unrelated-histories
+         if git merge --no-ff --no-edit --allow-unrelated-histories FETCH_HEAD; then
+          echo "Merge successful"
+         else
+          echo "Merge failed. Attempting to abort if a merge is in progress..."
+          git merge --abort 2>/dev/null || true
+          exit 1
+         fi
       - name: Push merged branch
         if: success()
         env:
