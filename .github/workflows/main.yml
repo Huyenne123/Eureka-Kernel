@@ -1,0 +1,61 @@
+name: Merge CIP108 into My Branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: 'Your branch that contains the custom 4.4.302 source'
+        required: true
+        default: 'R15N-cip108'
+      cip_ref:
+        description: 'CIP tag or branch to merge (e.g., v4.4.302-cip108)'
+        required: true
+        default: 'v4.4.302-cip108'
+      target_branch:
+        description: 'New branch to create with the merge result'
+        required: true
+        default: 'merged-cip108'
+      cip_remote_url:
+        description: 'URL of the CIP kernel repository'
+        required: true
+        default: 'https://gitlab.com/cip-project/cip-kernel/linux-cip.git'
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout your repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # fetch all history for proper merging
+          ref: ${{ github.event.inputs.source_branch }}
+
+      - name: Add CIP remote and fetch
+        run: |
+          git remote add cip ${{ github.event.inputs.cip_remote_url }}
+          git fetch cip ${{ github.event.inputs.cip_ref }} --depth=100
+
+      - name: Verify current branch
+        run: |
+          echo "Current branch: $(git branch --show-current)"
+          git log -1 --oneline
+
+      - name: Merge CIP ref into current branch
+        id: merge
+        run: |
+          # Attempt merge with no-fast-forward to preserve history
+          if git merge --no-ff --no-edit FETCH_HEAD; then
+            echo "Merge successful"
+          else
+            echo "Merge conflict detected. Aborting."
+            git merge --abort
+            exit 1
+          fi
+
+      - name: Push merged branch
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}
+          git push origin HEAD:${{ github.event.inputs.target_branch }}
