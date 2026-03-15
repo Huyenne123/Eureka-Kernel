@@ -68,12 +68,14 @@ jobs:
       - name: Configure kernel
         working-directory: ./kernel
         run: |
-          make O=out ARCH=arm64 exynos7885-a30_defconfig
+          export PLATFORM_VERSION=11
+          make O=out ARCH=arm64 ANDROID_MAJOR_VERSION=r exynos7885-a30_defconfig
           
       - name: Build kernel
         working-directory: ./kernel
         run: |
-          make -j$(nproc) O=out ARCH=arm64 \
+          export PLATFORM_VERSION=11
+          make -j$(nproc) O=out ARCH=arm64 ANDROID_MAJOR_VERSION=r\
             CC=${CC} LD=${LD} AR=${AR} NM=${NM} \
             OBJCOPY=${OBJCOPY} OBJDUMP=${OBJDUMP} STRIP=${STRIP} \
             CROSS_COMPILE=${CROSS_COMPILE} 2>&1 | tee build.log
