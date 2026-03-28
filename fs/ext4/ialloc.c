@@ -334,9 +334,9 @@ void ext4_free_inode(handle_t *handle, struct inode *inode)
 	if (sbi->s_log_groups_per_flex) {
 		ext4_group_t f = ext4_flex_group(sbi, block_group);
 
-		atomic_inc(&sbi->s_flex_groups[f].free_inodes);
+		atomic_inc(&sbi->s_flex_groups[f]->free_inodes);
 		if (is_directory)
-			atomic_dec(&sbi->s_flex_groups[f].used_dirs);
+			atomic_dec(&sbi->s_flex_groups[f]->used_dirs);
 	}
 	BUFFER_TRACE(bh2, "call ext4_handle_dirty_metadata");
 	fatal = ext4_handle_dirty_metadata(handle, NULL, bh2);
@@ -380,7 +380,7 @@ static void get_orlov_stats(struct super_block *sb, ext4_group_t g,
 			    int flex_size, struct orlov_stats *stats)
 {
 	struct ext4_group_desc *desc;
-	struct flex_groups *flex_group = EXT4_SB(sb)->s_flex_groups;
+	struct flex_groups **flex_group = EXT4_SB(sb)->s_flex_groups;
 
 	if (flex_size > 1) {
 		stats->free_inodes = atomic_read(&flex_group[g].free_inodes);
@@ -1011,7 +1011,7 @@ got:
 		if (sbi->s_log_groups_per_flex) {
 			ext4_group_t f = ext4_flex_group(sbi, group);
 
-			atomic_inc(&sbi->s_flex_groups[f].used_dirs);
+			atomic_inc(&sbi->s_flex_groups[f]->used_dirs);
 		}
 	}
 	if (ext4_has_group_desc_csum(sb)) {
