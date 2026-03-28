@@ -724,16 +724,10 @@ void do_close_on_exec(struct files_struct *files)
 	}
 	spin_unlock(&files->file_lock);
 }
-static inline bool get_file_rcu_many(struct file *x, unsigned int refs)
-{
-	return atomic_long_add_unless(&x->f_count, refs, 0);
-}
 
-static void fput_many(struct file *file, unsigned int refs)
-{
-	if (atomic_long_sub_and_test((long)refs, &file->f_count))
-		__fput(file);
-}
+#define fput_many(file, refs) \
+	do { while ((refs)--) fput(file); } while (0)
+
 static inline struct file *__fget_files_rcu(struct files_struct *files,
 		unsigned int fd, fmode_t mask, unsigned int refs)
 {
