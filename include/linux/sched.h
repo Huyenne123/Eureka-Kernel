@@ -1950,6 +1950,8 @@ struct task_struct {
 #endif
 #ifdef CONFIG_FUTEX
 	struct robust_list_head __user *robust_list;
+	struct mutex futex_exit_mutex;
+	unsigned int futex_state;
 #ifdef CONFIG_COMPAT
 	struct compat_robust_list_head __user *compat_robust_list;
 #endif
