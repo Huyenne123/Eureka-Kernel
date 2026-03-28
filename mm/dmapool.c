@@ -23,6 +23,7 @@
  */
 
 #include <linux/device.h>
+#include <linux/sysfs.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmapool.h>
 #include <linux/kernel.h>
