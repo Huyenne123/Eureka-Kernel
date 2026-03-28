@@ -51,6 +51,15 @@
 #include "mballoc.h"
 #include "../mount.h"
 
+/* Compat shims - s_flex_groups is a pointer array in this kernel */
+#define sbi_array_rcu_deref(sbi, field, index) \
+	((sbi)->field[(index)])
+
+static inline void ext4_kvfree_array_rcu(void *arr)
+{
+	kvfree(arr);
+}
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/ext4.h>
 
