@@ -30,6 +30,14 @@
 #include <linux/memcontrol.h>
 #include "internal.h"
 
+#ifndef bdi_dev_name
+static inline const char *bdi_dev_name(struct backing_dev_info *bdi)
+{
+	if (!bdi || !bdi->dev)
+		return "(unknown)";
+	return dev_name(bdi->dev);
+}
+#endif
 /*
  * 4MB minimal write chunk size
  */
