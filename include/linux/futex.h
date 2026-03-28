@@ -55,6 +55,8 @@ union futex_key {
 #define FUTEX_KEY_INIT (union futex_key) { .both = { .ptr = 0ULL } }
 
 #ifdef CONFIG_FUTEX
+extern void exit_robust_list(struct task_struct *curr);
+extern void exit_pi_state_list(struct task_struct *curr);
 enum {
 	FUTEX_STATE_OK,
 	FUTEX_STATE_EXITING,
