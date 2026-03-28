@@ -398,7 +398,8 @@ static int bpf_fill_super(struct super_block *sb, void *data, int silent)
 static struct dentry *bpf_mount(struct file_system_type *type, int flags,
 				const char *dev_name, void *data)
 {
-	return mount_ns(type, flags, current->nsproxy->mnt_ns, bpf_fill_super);
+	return mount_ns(type, flags, data, current->nsproxy->mnt_ns,
+			current_user_ns(), bpf_fill_super);
 }
 
 static struct file_system_type bpf_fs_type = {
