@@ -332,7 +332,7 @@ static inline bool should_fail_futex(bool fshared)
 #endif /* CONFIG_FAIL_FUTEX */
 
 #ifdef CONFIG_COMPAT
-static void compat_exit_robust_list(struct task_struct *curr);
+void compat_exit_robust_list(struct task_struct *curr);
 #else
 static inline void compat_exit_robust_list(struct task_struct *curr) { }
 #endif
