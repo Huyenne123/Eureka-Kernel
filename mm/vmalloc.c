@@ -1,3 +1,4 @@
+void vmalloc_sync_unmappings(void);
 /*
  *  linux/mm/vmalloc.c
  *
