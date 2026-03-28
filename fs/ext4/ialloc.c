@@ -383,9 +383,9 @@ static void get_orlov_stats(struct super_block *sb, ext4_group_t g,
 	struct flex_groups **flex_group = EXT4_SB(sb)->s_flex_groups;
 
 	if (flex_size > 1) {
-		stats->free_inodes = atomic_read(&flex_group[g].free_inodes);
-		stats->free_clusters = atomic64_read(&flex_group[g].free_clusters);
-		stats->used_dirs = atomic_read(&flex_group[g].used_dirs);
+		stats->free_inodes = atomic_read(&flex_group[g]->free_inodes);
+		stats->free_clusters = atomic64_read(&flex_group[g]->free_clusters);
+		stats->used_dirs = atomic_read(&flex_group[g]->used_dirs);
 		return;
 	}
 
