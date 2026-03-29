@@ -212,4 +212,6 @@ static inline const char *kbasename(const char *path)
 
 void memcpy_and_pad(void *dest, size_t dest_len, const void *src, size_t count,
 		    int pad);
+extern int bcmp(const void *a, const void *b, size_t len);
+extern char *stpcpy(char *dest, const char *src);
 #endif /* _LINUX_STRING_H_ */
