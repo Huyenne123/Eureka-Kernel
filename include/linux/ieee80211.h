@@ -2550,4 +2550,22 @@ static inline bool ieee80211_action_contains_tpc(struct sk_buff *skb)
 	return true;
 }
 
+struct element {
+    u8 id;
+    u8 datalen;
+    u8 data[];
+} __packed;
+
+#define for_each_element(elem, data, len)                           \
+    for (elem = (const struct element *)(data);                     \
+         (const u8 *)(data) + (len) - (const u8 *)elem >=          \
+             sizeof(*elem) &&                                        \
+         (const u8 *)(data) + (len) - (const u8 *)elem >=          \
+             sizeof(*elem) + elem->datalen;                         \
+         elem = (const struct element *)((const u8 *)elem +         \
+                                         sizeof(*elem) + elem->datalen))
+
+#define for_each_element_completed(elem, data, len)                 \
+    ((const u8 *)(elem) == (const u8 *)(data) + (len))
+
 #endif /* LINUX_IEEE80211_H */
