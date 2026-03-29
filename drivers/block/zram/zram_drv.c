@@ -218,7 +218,7 @@ static inline void zram_fill_page(void *ptr, unsigned long len,
 {
 	WARN_ON_ONCE(!IS_ALIGNED(len, sizeof(unsigned long)));
 
-	memset_l(ptr, value, len / sizeof(unsigned long));
+	memset(ptr, value ? 0xff : 0, len);
 }
 
 static bool page_same_filled(void *ptr, unsigned long *element)
