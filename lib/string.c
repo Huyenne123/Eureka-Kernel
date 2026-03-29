@@ -1079,3 +1079,16 @@ char *strreplace(char *s, char old, char new)
 	return s;
 }
 EXPORT_SYMBOL(strreplace);
+
+int bcmp(const void *a, const void *b, size_t len)
+{
+    return memcmp(a, b, len);
+}
+EXPORT_SYMBOL(bcmp);
+
+char *stpcpy(char *dest, const char *src)
+{
+    while ((*dest++ = *src++) != '\0');
+    return dest - 1;
+}
+EXPORT_SYMBOL(stpcpy);
