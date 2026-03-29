@@ -506,12 +506,6 @@ int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 }
 EXPORT_SYMBOL(sock_queue_rcv_skb);
 
-int sk_receive_skb(struct sock *sk, struct sk_buff *skb, const int nested)
-{
-    return __sk_receive_skb(sk, skb, nested, 1);
-}
-EXPORT_SYMBOL(sk_receive_skb);
-
 int __sk_receive_skb(struct sock *sk, struct sk_buff *skb,
 		     const int nested, unsigned int trim_cap)
 {
@@ -554,6 +548,12 @@ discard_and_relse:
 	goto out;
 }
 EXPORT_SYMBOL(__sk_receive_skb);
+
+int sk_receive_skb(struct sock *sk, struct sk_buff *skb, const int nested)
+{
+    return __sk_receive_skb(sk, skb, nested, 1);
+}
+EXPORT_SYMBOL(sk_receive_skb);
 
 struct dst_entry *__sk_dst_check(struct sock *sk, u32 cookie)
 {
