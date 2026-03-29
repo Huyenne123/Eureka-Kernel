@@ -6,7 +6,7 @@
 
 #define USB_MAJOR			180
 #define USB_DEVICE_MAJOR		189
-
+#define USB_QUIRK_ENDPOINT_BLACKLIST	BIT(16)
 
 #ifdef __KERNEL__
 
