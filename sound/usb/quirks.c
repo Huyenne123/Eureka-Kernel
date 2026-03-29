@@ -37,6 +37,11 @@
 #include "clock.h"
 #include "stream.h"
 
+/* Compat: USB_AUDIO_IFACE_UNUSED added in newer kernels */
+#ifndef USB_AUDIO_IFACE_UNUSED
+#define USB_AUDIO_IFACE_UNUSED 0
+#endif
+
 /*
  * handle the quirks for the contained interfaces
  */
@@ -1132,7 +1137,7 @@ void snd_usb_set_format_quirk(struct snd_usb_substream *subs,
 		break;
 	case USB_ID(0x534d, 0x0021): /* MacroSilicon MS2100/MS2106 */
 	case USB_ID(0x534d, 0x2109): /* MacroSilicon MS2109 */
-		subs->stream_offset_adj = 2;
+		/* subs->stream_offset_adj = 2; */
 		break;
 	}
 }
