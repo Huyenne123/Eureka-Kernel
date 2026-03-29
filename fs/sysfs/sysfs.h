@@ -7,6 +7,9 @@
  *
  * This file is released under the GPLv2.
  */
+#ifndef sysfs_emit
+#define sysfs_emit(buf, fmt, ...) scnprintf(buf, PAGE_SIZE, fmt, ##__VA_ARGS__)
+#endif
 
 #ifndef __SYSFS_INTERNAL_H
 #define __SYSFS_INTERNAL_H
