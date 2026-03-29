@@ -508,7 +508,7 @@ EXPORT_SYMBOL(sock_queue_rcv_skb);
 
 int sk_receive_skb(struct sock *sk, struct sk_buff *skb, const int nested)
 {
-    return __sk_receive_skb(sk, skb, nested, 1, true);
+    return __sk_receive_skb(sk, skb, nested, 1);
 }
 EXPORT_SYMBOL(sk_receive_skb);
 
