@@ -40,6 +40,17 @@
 #define __FS_HAS_ENCRYPTION IS_ENABLED(CONFIG_EXT4_FS_ENCRYPTION)
 #include <linux/fscrypt.h>
 
+/* Compat shims for RCU array helpers backported from newer kernels */
+#ifndef sbi_array_rcu_deref
+#define sbi_array_rcu_deref(sbi, field, index) \
+	((sbi)->field[(index)])
+#endif
+
+static inline void ext4_kvfree_array_rcu(void *arr)
+{
+	kvfree(arr);
+}
+
 /*
  * The fourth extended filesystem constants/structures
  */
