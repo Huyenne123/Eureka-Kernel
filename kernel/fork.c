@@ -109,6 +109,20 @@
  */
 #define MAX_THREADS FUTEX_TID_MASK
 
+void exit_mm_release(struct task_struct *tsk, struct mm_struct *mm)
+{
+    futex_exit_release(tsk);
+    mm_release(tsk, mm);
+}
+EXPORT_SYMBOL(exit_mm_release);
+
+void exec_mm_release(struct task_struct *tsk, struct mm_struct *mm)
+{
+    futex_exec_release(tsk);
+    mm_release(tsk, mm);
+}
+EXPORT_SYMBOL(exec_mm_release);
+
 /*
  * Protected counters by write_lock_irq(&tasklist_lock)
  */
