@@ -560,6 +560,9 @@ EXPORT_SYMBOL_GPL(sysfs_remove_bin_file);
  *
  * Returns number of characters written to @buf.
  */
+#ifdef sysfs_emit
+#undef sysfs_emit
+#endif
 int sysfs_emit(char *buf, const char *fmt, ...)
 {
 	va_list args;
@@ -576,6 +579,7 @@ int sysfs_emit(char *buf, const char *fmt, ...)
 }
 EXPORT_SYMBOL_GPL(sysfs_emit);
 
+
 /**
  *	sysfs_emit_at - scnprintf equivalent, aware of PAGE_SIZE buffer.
  *	@buf:	start of PAGE_SIZE buffer.
@@ -587,6 +591,9 @@ EXPORT_SYMBOL_GPL(sysfs_emit);
  *
  * Returns number of characters written starting at &@buf[@at].
  */
+#ifdef sysfs_emit_at
+#undef sysfs_emit_at
+#endif
 int sysfs_emit_at(char *buf, int at, const char *fmt, ...)
 {
 	va_list args;
