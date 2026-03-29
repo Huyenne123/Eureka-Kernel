@@ -167,6 +167,8 @@ int ipv6_sock_mc_join(struct sock *sk, int ifindex,
 int ipv6_sock_mc_drop(struct sock *sk, int ifindex,
 		      const struct in6_addr *addr);
 void ipv6_sock_mc_close(struct sock *sk);
+void __ipv6_sock_mc_close(struct sock *sk);
+void __ipv6_sock_ac_close(struct sock *sk);
 bool inet6_mc_check(struct sock *sk, const struct in6_addr *mc_addr,
 		    const struct in6_addr *src_addr);
 
