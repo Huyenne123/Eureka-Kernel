@@ -387,10 +387,7 @@ struct hid_local {
  * This is the collection stack. We climb up the stack to determine
  * application and function of each field.
  */
-static inline bool hid_is_usb(struct hid_device *hdev)
-{
-    return hdev->bus == BUS_USB;
-}
+
 struct hid_collection {
 	unsigned type;
 	unsigned usage;
@@ -572,7 +569,10 @@ struct hid_device {							/* device report descriptor */
 	spinlock_t  debug_list_lock;
 	wait_queue_head_t debug_wait;
 };
-
+static inline bool hid_is_usb(struct hid_device *hdev)
+{
+    return hdev->bus == BUS_USB;
+}
 static inline void *hid_get_drvdata(struct hid_device *hdev)
 {
 	return dev_get_drvdata(&hdev->dev);
