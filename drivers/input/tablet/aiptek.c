@@ -182,6 +182,16 @@
  * (Step 9 can be omitted, but you'll then have no function keys.)
  */
 
+/* backport: usb_find_common_endpoints not in this kernel version's usb.h */
+#ifndef usb_find_common_endpoints
+int usb_find_common_endpoints(struct usb_host_interface *alt,
+        struct usb_endpoint_descriptor **bulk_in,
+        struct usb_endpoint_descriptor **bulk_out,
+        struct usb_endpoint_descriptor **int_in,
+        struct usb_endpoint_descriptor **int_out);
+#endif
+
+
 #define USB_VENDOR_ID_AIPTEK				0x08ca
 #define USB_VENDOR_ID_KYE				0x0458
 #define USB_REQ_GET_REPORT				0x01
