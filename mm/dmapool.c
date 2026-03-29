@@ -39,30 +39,6 @@
 #include <linux/types.h>
 #include <linux/wait.h>
 
-#ifndef sysfs_emit
-static inline __printf(2, 3)
-int sysfs_emit(char *buf, const char *fmt, ...)
-{
-    va_list args;
-    int len;
-    va_start(args, fmt);
-    len = vscnprintf(buf, PAGE_SIZE, fmt, args);
-    va_end(args);
-    return len;
-}
-
-static inline __printf(3, 4)
-int sysfs_emit_at(char *buf, int at, const char *fmt, ...)
-{
-    va_list args;
-    int len;
-    va_start(args, fmt);
-    len = vscnprintf(buf + at, PAGE_SIZE - at, fmt, args);
-    va_end(args);
-    return len;
-}
-#endif
-
 #if defined(CONFIG_DEBUG_SLAB) || defined(CONFIG_SLUB_DEBUG_ON)
 #define DMAPOOL_DEBUG 1
 #endif
