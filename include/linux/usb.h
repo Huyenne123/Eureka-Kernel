@@ -1904,31 +1904,6 @@ enum usb_led_event {
 	USB_LED_EVENT_GADGET = 1,
 };
 
-/* backport from newer kernel */
-static inline int usb_find_common_endpoints(struct usb_host_interface *alt,
-        struct usb_endpoint_descriptor **bulk_in,
-        struct usb_endpoint_descriptor **bulk_out,
-        struct usb_endpoint_descriptor **int_in,
-        struct usb_endpoint_descriptor **int_out)
-{
-    struct usb_endpoint_descriptor *e;
-    int i;
-
-    if (bulk_in)  *bulk_in  = NULL;
-    if (bulk_out) *bulk_out = NULL;
-    if (int_in)   *int_in   = NULL;
-    if (int_out)  *int_out  = NULL;
-
-    for (i = 0; i < alt->desc.bNumEndpoints; i++) {
-        e = &alt->endpoint[i].desc;
-        if (usb_endpoint_is_bulk_in(e))       { if (bulk_in  && !*bulk_in)  *bulk_in  = e; }
-        else if (usb_endpoint_is_bulk_out(e)) { if (bulk_out && !*bulk_out) *bulk_out = e; }
-        else if (usb_endpoint_is_int_in(e))   { if (int_in   && !*int_in)   *int_in   = e; }
-        else if (usb_endpoint_is_int_out(e))  { if (int_out  && !*int_out)  *int_out  = e; }
-    }
-    return 0;
-}
-
 #ifdef CONFIG_USB_LED_TRIG
 extern void usb_led_activity(enum usb_led_event ev);
 #else
