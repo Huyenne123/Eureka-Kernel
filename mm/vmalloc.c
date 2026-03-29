@@ -42,6 +42,11 @@ atomic_long_t nr_vmalloc_pages;
 
 #include "internal.h"
 
+void vmalloc_sync_all(void)
+{
+}
+EXPORT_SYMBOL(vmalloc_sync_all);
+
 struct vfree_deferred {
 	struct llist_head list;
 	struct work_struct wq;
