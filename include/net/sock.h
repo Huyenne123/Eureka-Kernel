@@ -673,7 +673,7 @@ static inline void sk_add_node_rcu(struct sock *sk, struct hlist_head *list)
 
 static inline void sk_add_node_tail_rcu(struct sock *sk, struct hlist_head *list)
 {
-    hlist_add_tail_rcu(&sk->sk_node, list);
+    hlist_add_rcu(&sk->sk_node, list);
 }
 
 static inline void __sk_nulls_add_node_rcu(struct sock *sk, struct hlist_nulls_head *list)
