@@ -292,7 +292,8 @@ int __compat_only_sysfs_link_entry_to_kobj(struct kobject *kobj,
 				      const char *target_name);
 
 void sysfs_notify(struct kobject *kobj, const char *dir, const char *attr);
-
+int sysfs_emit(char *buf, const char *fmt, ...) __printf(2, 3);
+int sysfs_emit_at(char *buf, int at, const char *fmt, ...) __printf(3, 4);
 int __must_check sysfs_init(void);
 
 static inline void sysfs_enable_ns(struct kernfs_node *kn)
@@ -496,7 +497,15 @@ static inline void sysfs_notify(struct kobject *kobj, const char *dir,
 				const char *attr)
 {
 }
+static inline int sysfs_emit(char *buf, const char *fmt, ...)
+{
+	return 0;
+}
 
+static inline int sysfs_emit_at(char *buf, int at, const char *fmt, ...)
+{
+	return 0;
+}
 static inline int __must_check sysfs_init(void)
 {
 	return 0;
