@@ -41,6 +41,9 @@ jobs:
           echo "# CONFIG_KPROBES is not set" >> arch/arm64/configs/exynos7885-a30_defconfig
           echo "# CONFIG_HAVE_KPROBES is not set" >> arch/arm64/configs/exynos7885-a30_defconfig
           echo "# CONFIG_KPROBES_EVENTS is not set" >> arch/arm64/configs/exynos7885-a30_defconfig
+          # Disable LTO to fix linking issues
+          echo "# CONFIG_LTO_CLANG is not set" >> arch/arm64/configs/exynos7885-a30_defconfig
+          echo "CONFIG_SIPHASH=y" >> arch/arm64/configs/exynos7885-a30_defconfig
           tail -10 arch/arm64/configs/exynos7885-a30_defconfig
       - name: Install build dependencies
         run: |
