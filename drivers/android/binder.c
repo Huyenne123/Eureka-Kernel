@@ -4951,7 +4951,7 @@ static int binder_thread_release(struct binder_proc *proc,
 	 * poll data structures holding it.
 	 */
 	if (thread->looper & BINDER_LOOPER_STATE_POLL)
-		wake_up_pollfree(&thread->wait);
+		wake_up(&thread->wait);
 
 	binder_inner_proc_unlock(thread->proc);
 
