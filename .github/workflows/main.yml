@@ -3,10 +3,10 @@ name: Build R15-OneUI + BPF merge from R24U
 on:
   workflow_dispatch:
   push:
-    branches: [ merge/cip108-onto-p6 ]
+    branches: [ cip108test ]
 
 env:
-  KERNEL_BRANCH: merge/cip108-onto-p6
+  KERNEL_BRANCH: cip108test
 
 jobs:
   build:
