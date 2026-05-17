@@ -110,7 +110,7 @@ jobs:
           cp kernel/out/arch/arm64/boot/Image.gz anykernel/ || \
           cp kernel/out/arch/arm64/boot/Image anykernel/
           [ -f kernel/out/arch/arm64/boot/dtb.img ] && cp kernel/out/arch/arm64/boot/dtb.img anykernel/ || true
-          cp -f kernel_zip/dtbo/a30/dtbo.img kernel_zip/anykernel/dtbo.img
+          cp -f kernel/kernel_zip/dtbo/a30/dtbo.img kernel_zip/anykernel/dtbo.img
 
       - name: Create flashable zip
         run: |
