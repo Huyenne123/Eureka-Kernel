@@ -4,8 +4,8 @@ SUBLEVEL = 302
 EXTRAVERSION = -p6
 
 NAME = Blurry Fish Butt
-export ANDROID_MAJOR_VERSION=r
-export PLATFORM_VERSION=11
+export ANDROID_MAJOR_VERSION=q
+export PLATFORM_VERSION=10
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
 # More info can be located in ./README
