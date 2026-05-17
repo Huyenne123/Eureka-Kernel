@@ -45,7 +45,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc bison flex libssl-dev make git python3 cpio gcc-aarch64-linux-gnu
+          sudo apt install -y bc bison flex libssl-dev make git python3 cpio gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
       - name: Setup Neutron Clang
         run: |
           mkdir -p toolchain
@@ -68,17 +68,31 @@ jobs:
       - name: Configure kernel
         working-directory: ./kernel
         run: |
-          export PLATFORM_VERSION=11
-          make O=out ARCH=arm64 ANDROID_MAJOR_VERSION=r exynos7885-a30_defconfig
+          export PLATFORM_VERSION=10
+          make O=out ARCH=arm64 ANDROID_MAJOR_VERSION=q exynos7885-a30_defconfig
           
       - name: Build kernel
         working-directory: ./kernel
         run: |
-          export PLATFORM_VERSION=11
-          make -j$(nproc) O=out ARCH=arm64 ANDROID_MAJOR_VERSION=r\
+          export PLATFORM_VERSION=10
+          make -j$(nproc) O=out ARCH=arm64 ANDROID_MAJOR_VERSION=q \
             CC=${CC} LD=${LD} AR=${AR} NM=${NM} \
             OBJCOPY=${OBJCOPY} OBJDUMP=${OBJDUMP} STRIP=${STRIP} \
             CROSS_COMPILE=${CROSS_COMPILE} 2>&1 | tee build.log
+      - name: Build DTB image
+        working-directory: ./kernel
+        run: |
+          export PLATFORM_VERSION=10
+          PATH="$(pwd)/../toolchain/bin:${PATH}" \
+          make dtb.img -j$(nproc) O=out \
+            ARCH=arm64 \
+            ANDROID_MAJOR_VERSION=q \
+            CC=clang \
+            LD_LIBRARY_PATH="$(pwd)/../toolchain/lib:${LD_LIBRARY_PATH}" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- 2>&1 | tee -a build.log
+
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -95,6 +109,8 @@ jobs:
           cp kernel/out/arch/arm64/boot/Image.gz-dtb anykernel/ || \
           cp kernel/out/arch/arm64/boot/Image.gz anykernel/ || \
           cp kernel/out/arch/arm64/boot/Image anykernel/
+          [ -f kernel/out/arch/arm64/boot/dtb.img ] && cp kernel/out/arch/arm64/boot/dtb.img anykernel/ || true
+          cp -f kernel_zip/dtbo/a30/dtbo.img kernel_zip/anykernel/dtbo.img
 
       - name: Create flashable zip
         run: |
