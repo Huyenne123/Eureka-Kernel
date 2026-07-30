@@ -3,10 +3,10 @@ name: Build R15-OneUI + BPF merge from R24U
 on:
   workflow_dispatch:
   push:
-    branches: [ legacy ]
+    branches: [ ok ]
 
 env:
-  KERNEL_BRANCH: legacy
+  KERNEL_BRANCH: ok
 
 jobs:
   build:
