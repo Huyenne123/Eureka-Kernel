@@ -1,27 +1,3 @@
-R15 Changelog:
+b0.8 Changelog:
 ################
-• KernelSU 0.7.1
-• reduce Jitter
-• Kill Wakelocks earlier
-• re-enable CGROUP_SCHEDTUNE
-• Disable RT_RUNTIME_SHARE by def.
-• stop spam s2mu106(charger-logs)
-• Support genirq effective affinity mask
-• Use interruptible waits(decon/cpufreq)
-• Improve UI/UX,OS,Game perf
-• Fs/Vfs upstream/patches(A14)
-• Disable PAN Emulation(improve libc,syscall)
-• fix warns while building
-• new vmalloc backported(perf benefits)
-• Update Sound Codec tfa98xx v6.7.8>v6.7.14
-• Increased a bit devfreq MIF boost
-• set vmstat 30s(batt improvment)
-• Disable iostats,io random by def.
-• Optim. memleaks,page-writeback,cache,I/O,load balance
-• Disable TTWU_QUEUE
-• apply-0fast/-0s/-03(code optim./non perf crit(size))
-• nuke VLA usage on fimc-is2/modem(runtime overhead) 
-• Disable menu gov(better cpu freq scaling (idle))
-• Increase limit on boost cgroups
-• Increase mem fragmentation index(kill less bg tasks)
-• misc upstreams/fixes/patches
+• yes
