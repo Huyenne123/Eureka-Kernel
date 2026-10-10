@@ -106,10 +106,16 @@ jobs:
       - name: Create flashable zip
         run: |
           cd anykernel
-          zip -r9 ../neyuKernel_${{ matrix.defconfig }}.zip *
+          zip -r9 aosp.zip *
           cd ..
+      - name: Prepare AROMA installer from source
+        run: |
+          cp -rv kernel/kernel_zip/aroma aroma
+      - name: Copy zip file to AROMA installer folder
+        run: |
+          cp -rv anykernel/aosp.zip aroma/kernel/aosp.zip
       - name: Upload zip
         uses: actions/upload-artifact@v4
         with:
           name: neyuKernel_${{ matrix.defconfig }}
-          path: neyuKernel_${{ matrix.defconfig }}.zip
+          path: aroma/*
