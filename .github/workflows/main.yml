@@ -38,7 +38,7 @@ jobs:
       - name: Setup KernelSUNext
         working-directory: ./kernel
         run: 
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s v1.1.1
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s v3.4.1
       
       - name: Enable KernelSU in defconfig
         working-directory: ./kernel
@@ -77,14 +77,12 @@ jobs:
       - name: Configure kernel
         working-directory: ./kernel
         run: |
-          export PLATFORM_VERSION=11
-          make O=out ARCH=arm64 ANDROID_MAJOR_VERSION=r ${{ matrix.defconfig }}
+          make O=out ARCH=arm64 ${{ matrix.defconfig }}
           
       - name: Build kernel
         working-directory: ./kernel
         run: |
-          export PLATFORM_VERSION=11
-          make -j$(nproc) O=out ARCH=arm64 ANDROID_MAJOR_VERSION=r \
+          make -j$(nproc) O=out ARCH=arm64 \
             CC=${CC} LD=${LD} AR=${AR} NM=${NM} \
             OBJCOPY=${OBJCOPY} OBJDUMP=${OBJDUMP} STRIP=${STRIP} \
             CROSS_COMPILE=${CROSS_COMPILE} 2>&1 | tee build.log
